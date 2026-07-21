@@ -1,0 +1,28 @@
+#!/bin/sh
+# Reload GoWAN when a WAN interface it uses comes up or goes down —
+# DHCP renewals can change the source IP the daemon must bind.
+
+[ "$ACTION" = "ifup" ] || [ "$ACTION" = "ifdown" ] || exit 0
+[ -x /etc/init.d/gowan ] || exit 0
+
+. /lib/functions.sh
+
+config_load gowan 2>/dev/null || exit 0
+
+enabled=0
+config_get_bool enabled main enabled 0
+[ "$enabled" -eq 0 ] && exit 0
+
+match=0
+_gowan_check_iface() {
+	local iface
+	config_get iface "$1" interface
+	[ "$iface" = "$INTERFACE" ] && match=1
+}
+config_foreach _gowan_check_iface wan
+
+[ "$match" -eq 1 ] || exit 0
+
+logger -t gowan "interface $INTERFACE $ACTION, reloading"
+/etc/init.d/gowan reload
+exit 0

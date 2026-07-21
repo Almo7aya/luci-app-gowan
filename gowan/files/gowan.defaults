@@ -1,0 +1,27 @@
+#!/bin/sh
+# Seed an ACL allow rule for the current LAN subnet so the default
+# acl_default=deny cannot lock clients out on a fresh install.
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+# Never touch an existing ACL setup (upgrade / reinstall).
+if uci -q show gowan | grep -q "=acl$"; then
+	exit 0
+fi
+
+network_flush_cache
+subnet=""
+network_get_subnet subnet lan
+
+if [ -n "$subnet" ]; then
+	uci -q batch <<-EOF
+		add gowan acl
+		set gowan.@acl[-1].enabled=1
+		set gowan.@acl[-1].verdict=allow
+		add_list gowan.@acl[-1].subnet=$subnet
+		set gowan.@acl[-1].description='LAN clients (seeded at install)'
+		commit gowan
+	EOF
+fi
+exit 0

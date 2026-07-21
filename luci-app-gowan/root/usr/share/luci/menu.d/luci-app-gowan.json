@@ -1,0 +1,67 @@
+{
+	"admin/network/gowan": {
+		"title": "GoWAN",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-gowan" ],
+			"uci": { "gowan": true }
+		}
+	},
+
+	"admin/network/gowan/overview": {
+		"title": "Overview",
+		"order": 1,
+		"action": {
+			"type": "view",
+			"path": "gowan/overview"
+		}
+	},
+
+	"admin/network/gowan/wans": {
+		"title": "WAN Backends",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "gowan/wans"
+		}
+	},
+
+	"admin/network/gowan/acl": {
+		"title": "Access Control",
+		"order": 3,
+		"action": {
+			"type": "view",
+			"path": "gowan/acl"
+		}
+	},
+
+	"admin/network/gowan/policy": {
+		"title": "Policy Rules",
+		"order": 4,
+		"action": {
+			"type": "view",
+			"path": "gowan/policy"
+		}
+	},
+
+	"admin/network/gowan/log": {
+		"title": "Log",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "gowan/log"
+		}
+	},
+
+	"admin/network/gowan/settings": {
+		"title": "Settings",
+		"order": 6,
+		"action": {
+			"type": "view",
+			"path": "gowan/settings"
+		}
+	}
+}

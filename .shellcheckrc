@@ -1,0 +1,8 @@
+# GoWAN targets OpenWrt's BusyBox ash — these classes are endemic to that
+# dialect and are not defects:
+#   SC1091: sourced OpenWrt libs (/lib/functions.sh, jshn.sh) don't exist
+#           on the machine running shellcheck
+#   SC3043: BusyBox ash supports 'local'; it is the standard OpenWrt idiom
+#   SC2317: config_foreach/config_list_foreach invoke callback functions
+#           indirectly, which shellcheck flags as unreachable
+disable=SC1091,SC3043,SC2317

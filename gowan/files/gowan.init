@@ -1,0 +1,90 @@
+#!/bin/sh /etc/rc.common
+
+# shellcheck disable=SC2034  # consumed by rc.common
+START=95
+# shellcheck disable=SC2034
+STOP=10
+# shellcheck disable=SC2034
+USE_PROCD=1
+PROG=/usr/sbin/gowan
+
+. /usr/lib/gowan/functions.sh
+
+append_wan_arg() {
+	local section="$1" enabled iface ratio ip
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" -eq 0 ] && return 0
+
+	config_get iface "$section" interface
+	[ -n "$iface" ] || return 0
+	config_get ratio "$section" ratio 1
+
+	if ! gowan_resolve_wan "$iface" ip; then
+		logger -t gowan "WAN $section: interface $iface has no IPv4 address, skipping"
+		return 0
+	fi
+	WAN_ARGS="$WAN_ARGS ${ip}@${ratio}"
+}
+
+start_service() {
+	local enabled listen_host listen_port log_connections
+	local ctype ctarget cint ctmo cfail crise
+
+	config_load gowan
+	network_flush_cache
+
+	config_get_bool enabled main enabled 0
+	[ "$enabled" -eq 0 ] && return 0
+
+	config_get listen_host main listen_host '0.0.0.0'
+	config_get listen_port main listen_port '1080'
+	config_get_bool log_connections main log_connections 1
+	config_get ctype main check_type 'tcp'
+	config_get ctarget main check_target '8.8.8.8:53'
+	config_get cint main check_interval 30
+	config_get ctmo main check_timeout 5
+	config_get cfail main check_fail_threshold 3
+	config_get crise main check_rise_threshold 2
+
+	mkdir -p "$GOWAN_RUN_DIR"
+
+	WAN_ARGS=""
+	config_foreach append_wan_arg wan
+	if [ -z "$WAN_ARGS" ]; then
+		logger -t gowan -p daemon.err "no usable WAN backends; not starting"
+		return 1
+	fi
+
+	gowan_apply_acl "$listen_port" || \
+		logger -t gowan -p daemon.err "failed to apply ACL nftables rules"
+
+	procd_open_instance proxy
+	procd_set_param command $PROG -lhost "$listen_host" -lport "$listen_port"
+	if [ "$ctype" != "none" ]; then
+		procd_append_param command \
+			-check-type "$ctype" -check-target "$ctarget" \
+			-check-interval "$cint" -check-timeout "$ctmo" \
+			-check-fail "$cfail" -check-rise "$crise" \
+			-state-file "$GOWAN_STATE_FILE"
+	fi
+	[ "$log_connections" -eq 0 ] && procd_append_param command -quiet
+	# shellcheck disable=SC2086  # word splitting of ip@ratio args is intended
+	procd_append_param command $WAN_ARGS
+	procd_set_param respawn 3600 5 0
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+stop_service() {
+	gowan_teardown_acl
+}
+
+service_triggers() {
+	procd_add_reload_trigger gowan
+}
+
+reload_service() {
+	stop
+	start
+}

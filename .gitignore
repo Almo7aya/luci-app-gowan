@@ -1,0 +1,11 @@
+# Go build outputs (source builds via the OpenWrt SDK in CI)
+gowan/src/gowan
+*.ipk
+*.apk
+
+# Local scratch
+/bin/
+/upload/
+
+# Local tooling
+.claude/

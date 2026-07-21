@@ -1,0 +1,168 @@
+#!/bin/sh
+# rpcd backend exposing the ubus object "gowan" (methods: status, stats, log).
+# All caller input is validated against UCI/numeric patterns before use —
+# ubus arguments never reach shell interpolation.
+
+. /usr/share/libubox/jshn.sh
+. /usr/lib/gowan/functions.sh
+
+# Reads one health.json field for a backend IP. IP comes from netifd, but
+# validate anyway before splicing into the jsonfilter expression.
+_health_field() {
+	local ip="$1" field="$2"
+	case "$ip" in
+		''|*[!0-9.]*) return 1 ;;
+	esac
+	[ -f "$GOWAN_STATE_FILE" ] || return 1
+	jsonfilter -i "$GOWAN_STATE_FILE" -e "@.backends[@.ip='$ip'].$field" 2>/dev/null
+}
+
+_add_wan_status() {
+	local section="$1" label iface ratio enabled ip device
+	local status since ok failed
+
+	config_get label "$section" label "$section"
+	config_get iface "$section" interface
+	config_get ratio "$section" ratio 1
+	config_get_bool enabled "$section" enabled 1
+
+	ip=""
+	device=""
+	[ -n "$iface" ] && {
+		network_get_ipaddr ip "$iface"
+		network_get_device device "$iface"
+	}
+
+	status="unknown"
+	since=0
+	ok=0
+	failed=0
+	if [ -n "$ip" ]; then
+		status=$(_health_field "$ip" status) || status="unknown"
+		since=$(_health_field "$ip" since) || since=0
+		ok=$(_health_field "$ip" checks_ok) || ok=0
+		failed=$(_health_field "$ip" checks_failed) || failed=0
+	fi
+
+	json_add_object ""
+	json_add_string section "$section"
+	json_add_string label "$label"
+	json_add_string interface "$iface"
+	json_add_string device "$device"
+	json_add_string ip "$ip"
+	json_add_int ratio "$ratio"
+	json_add_boolean enabled "$enabled"
+	json_add_string status "${status:-unknown}"
+	json_add_int since "${since:-0}"
+	json_add_int checks_ok "${ok:-0}"
+	json_add_int checks_failed "${failed:-0}"
+	json_close_object
+}
+
+do_status() {
+	local enabled listen_host listen_port running=0
+
+	config_load gowan
+	network_flush_cache
+
+	config_get_bool enabled main enabled 0
+	config_get listen_host main listen_host '0.0.0.0'
+	config_get listen_port main listen_port '1080'
+	[ -n "$(pidof gowan)" ] && running=1
+
+	json_init
+	json_add_boolean enabled "$enabled"
+	json_add_boolean running "$running"
+	json_add_string listen "$listen_host:$listen_port"
+	json_add_array wans
+	config_foreach _add_wan_status wan
+	json_close_array
+	json_dump
+}
+
+_add_wan_stats() {
+	local section="$1" iface device line rx_bytes rx_pkts tx_bytes tx_pkts
+
+	config_get iface "$section" interface
+	[ -n "$iface" ] || return 0
+	network_get_device device "$iface"
+	[ -n "$device" ] || return 0
+
+	line=$(grep "^ *$device:" /proc/net/dev 2>/dev/null) || return 0
+	# shellcheck disable=SC2086  # field splitting of the counters is intended
+	set -- ${line#*:}
+	rx_bytes=$1
+	rx_pkts=$2
+	tx_bytes=$9
+	tx_pkts=${10}
+
+	json_add_object ""
+	json_add_string section "$section"
+	json_add_string device "$device"
+	json_add_int rx_bytes "${rx_bytes:-0}"
+	json_add_int rx_packets "${rx_pkts:-0}"
+	json_add_int tx_bytes "${tx_bytes:-0}"
+	json_add_int tx_packets "${tx_pkts:-0}"
+	json_close_object
+}
+
+do_stats() {
+	config_load gowan
+	network_flush_cache
+
+	json_init
+	json_add_array wans
+	config_foreach _add_wan_stats wan
+	json_close_array
+	json_dump
+}
+
+do_log() {
+	local input lines logdata line
+
+	read -r input
+	lines=$(jsonfilter -s "$input" -e '@.lines' 2>/dev/null)
+	case "$lines" in
+		''|*[!0-9]*) lines=100 ;;
+	esac
+	[ "$lines" -gt 500 ] && lines=500
+	[ "$lines" -lt 1 ] && lines=1
+
+	logdata=$(logread -e gowan 2>/dev/null | tail -n "$lines")
+
+	json_init
+	json_add_array log
+	# A piped while-loop would run in a subshell and lose the jshn state;
+	# feed the loop from a heredoc instead.
+	if [ -n "$logdata" ]; then
+		while IFS= read -r line; do
+			json_add_string "" "$line"
+		done <<-EOF
+			$logdata
+		EOF
+	fi
+	json_close_array
+	json_dump
+}
+
+case "$1" in
+	list)
+		json_init
+		json_add_object status
+		json_close_object
+		json_add_object stats
+		json_close_object
+		json_add_object log
+		json_add_int lines 100
+		json_close_object
+		json_dump
+		;;
+	call)
+		case "$2" in
+			status) do_status ;;
+			stats) do_stats ;;
+			log) do_log ;;
+			*) exit 1 ;;
+		esac
+		;;
+esac

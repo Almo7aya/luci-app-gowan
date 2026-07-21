@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  go:
+    name: Go vet, fmt, unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gowan/src
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on: $unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (with race detector)
+        run: go test -race ./...
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: shellcheck
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y shellcheck
+          shellcheck -s sh \
+            gowan/files/gowan-functions.sh \
+            gowan/files/gowan.init \
+            gowan/files/gowan-hotplug \
+            gowan/files/gowan.defaults \
+            gowan/files/gowan-rpcd \
+            scripts/netns-smoke.sh
+
+  integration:
+    name: Netns failover smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+
+      - name: Run netns smoke test
+        run: sudo --preserve-env=PATH scripts/netns-smoke.sh
+
+  sdk-build:
+    name: OpenWrt SDK build (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build with OpenWrt SDK
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-24.10.2
+          PACKAGES: gowan luci-app-gowan
+          NO_REFRESH_CHECK: true
+          V: s
+
+      - name: List built packages
+        run: find bin/ -name '*gowan*' -type f

@@ -1,0 +1,14 @@
+{
+	"luci-app-gowan": {
+		"description": "Grant access to GoWAN configuration and status",
+		"read": {
+			"ubus": {
+				"gowan": [ "status", "stats", "log" ]
+			},
+			"uci": [ "gowan" ]
+		},
+		"write": {
+			"uci": [ "gowan" ]
+		}
+	}
+}
