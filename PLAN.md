@@ -166,10 +166,10 @@
 | # | Feature | Description |
 |---|---------|-------------|
 | 13 | **Transparent proxy mode** ✅ *shipped in v0.2.0* | Flagship. nft `redirect` + `-transparent` listener reading `SO_ORIGINAL_DST`: every LAN TCP connection balanced with zero client config. Includes QUIC-block rule (UDP/443 → TCP fallback). SOCKS5 listener remains alongside. Replaces the old redsocks/tun2socks plan. Verified on hardware 2026-07-21. |
-| 14 | Promote `gowan/src/` to standalone repo | When it earns it (transparent mode shipped, or outside interest); config file, hot reload, status API, auth, policy, sticky land there |
-| 15 | Per-backend check config | Config file allows per-backend check type/target/interval (Phase 1 checks are global-only) |
-| 16 | Hot-reload via SIGHUP | Reload config without dropping active connections |
-| 17 | JSON status API | `GET /status` on localhost; LuCI polls it live; usable by Prometheus/Uptime Kuma |
+| 14 | Promote `gowan/src/` to standalone repo | When it earns it (transparent mode shipped, or outside interest); auth, policy, sticky land there |
+| 15 | Per-backend check config ✅ *shipped in v0.3.0* | Backends file (`/var/run/gowan/backends.json`, rendered from UCI) carries optional per-WAN check overrides; absent fields inherit global flags |
+| 16 | Hot-reload via SIGHUP ✅ *shipped in v0.3.0* | Daemon re-reads the backends file on SIGHUP and swaps the set without dropping connections; surviving backends keep health + counters. Init reloads via signal unless a listener-affecting option changed; hotplug WAN-IP changes are now seamless |
+| 17 | JSON status API ✅ *shipped in v0.3.0* | `-api 127.0.0.1:9080` → `GET /status`: uptime, per-backend health and connection counters; localhost-only |
 | 18 | Policy routing (all types) | domain / client-IP / port / dest-IP → WAN, evaluated in-process (domain rules match SOCKS5 traffic only — see Policy spec) |
 | 19 | Sticky sessions | In-memory client-IP → WAN map with TTL |
 | 20 | SOCKS5 authentication | RFC 1929 username/password (SOCKS5 listener only; transparent mode is ACL-guarded) |

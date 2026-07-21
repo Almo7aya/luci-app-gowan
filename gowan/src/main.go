@@ -15,17 +15,35 @@ import (
 )
 
 type load_balancer struct {
+	name                string
 	address             string
 	iface               string
 	contention_ratio    int
 	current_connections int
 
-	// Health state. Written by the backend's health checker and the
-	// startup code; every access goes through the global mutex.
+	// Health + traffic state. Written by the backend's health checker,
+	// the dispatch path and the startup/reload code; every access goes
+	// through the global mutex.
 	up            bool
 	status_since  int64
 	checks_ok     uint64
 	checks_failed uint64
+	total_conns   uint64
+	active_conns  int64
+}
+
+// Bracket a proxied connection's lifetime for the status counters.
+func (lb *load_balancer) conn_started() {
+	mutex.Lock()
+	lb.total_conns++
+	lb.active_conns++
+	mutex.Unlock()
+}
+
+func (lb *load_balancer) conn_finished() {
+	mutex.Lock()
+	lb.active_conns--
+	mutex.Unlock()
 }
 
 // The load balancer used in the previous connection
@@ -88,26 +106,33 @@ func advance_lb_index() {
 }
 
 /*
-Joins the local and remote connections together
+Joins the local and remote connections together. done (optional) runs
+once both directions have finished.
 */
-func pipe_connections(local_conn, remote_conn net.Conn) {
+func pipe_connections(local_conn, remote_conn net.Conn, done func()) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
+		defer wg.Done()
 		defer remote_conn.Close()
 		defer local_conn.Close()
-		_, err := io.Copy(remote_conn, local_conn)
-		if err != nil {
-			return
-		}
+		io.Copy(remote_conn, local_conn)
 	}()
 
 	go func() {
+		defer wg.Done()
 		defer remote_conn.Close()
 		defer local_conn.Close()
-		_, err := io.Copy(local_conn, remote_conn)
-		if err != nil {
-			return
-		}
+		io.Copy(local_conn, remote_conn)
 	}()
+
+	if done != nil {
+		go func() {
+			wg.Wait()
+			done()
+		}()
+	}
 }
 
 /*
@@ -134,7 +159,8 @@ func handle_tunnel_connection(conn net.Conn) {
 		}
 
 		log.Println("[DEBUG] Tunnelled to", lb.address, "LB:", i)
-		pipe_connections(conn, remote_conn)
+		lb.conn_started()
+		pipe_connections(conn, remote_conn, lb.conn_finished)
 		return
 	}
 }
@@ -261,6 +287,7 @@ func parse_load_balancers(args []string, tunnel bool) {
 
 		log.Printf("[INFO] Load balancer %d: %s%s, contention ratio: %d\n", idx+1, lb_ip_or_fqdn, slbport, cont_ratio)
 		lb_list[idx] = &load_balancer{
+			name:             lb_ip_or_fqdn,
 			address:          fmt.Sprintf("%s:%d", lb_ip_or_fqdn, lb_port),
 			iface:            iface,
 			contention_ratio: cont_ratio,
@@ -289,6 +316,8 @@ func main() {
 	var state_path = flag.String("state-file", "", "Write backend health state as JSON to this file")
 	var on_change = flag.String("on-change", "", "Run '<cmd> <backend-ip> <old-state> <new-state>' on every health flip")
 	var transparent_port = flag.Int("transparent", 0, "Also accept nft/iptables-REDIRECTed connections on this port (Linux only, 0 = off)")
+	var backends_path = flag.String("backends-file", "", "Load backends (with per-backend check config) from this JSON file; SIGHUP re-reads it without dropping connections")
+	var api_addr = flag.String("api", "", "Serve GET /status as JSON on this address, e.g. 127.0.0.1:9080 (empty = off)")
 
 	flag.Parse()
 	if *detect {
@@ -321,27 +350,52 @@ func main() {
 	default:
 		log.Fatal("[FATAL] Invalid check type ", *check_type)
 	}
-
-	//Parse remaining string to get addresses of load balancers
-	parse_load_balancers(flag.Args(), *tunnel)
+	if *backends_path != "" && *tunnel {
+		log.Fatal("[FATAL] -backends-file is not available in tunnel mode")
+	}
 
 	state_file = *state_path
 	on_change_cmd = *on_change
-	write_state_file()
+	global_check_cfg = check_config{
+		ctype:    *check_type,
+		target:   *check_target,
+		interval: time.Duration(*check_interval) * time.Second,
+		timeout:  time.Duration(*check_timeout) * time.Second,
+		fail:     *check_fail,
+		rise:     *check_rise,
+	}
+	if *tunnel && *check_type != "none" {
+		log.Println("[WARN] health checks are not supported in tunnel mode, disabled")
+		global_check_cfg.ctype = "none"
+	}
 
-	if *check_type != "none" {
-		if *tunnel {
-			log.Println("[WARN] health checks are not supported in tunnel mode, disabled")
-		} else {
-			start_health_checks(check_config{
-				ctype:    *check_type,
-				target:   *check_target,
-				interval: time.Duration(*check_interval) * time.Second,
-				timeout:  time.Duration(*check_timeout) * time.Second,
-				fail:     *check_fail,
-				rise:     *check_rise,
-			})
+	if *backends_path != "" {
+		// Backends (and per-backend check config) come from the file;
+		// SIGHUP re-reads it. Positional arguments are ignored.
+		backends_file = *backends_path
+		list, err := load_backends_file(backends_file)
+		if err != nil {
+			log.Fatalln("[FATAL]", err)
 		}
+		if apply_backends(list) == 0 {
+			log.Fatalln("[FATAL] backends file has no usable backends")
+		}
+	} else {
+		//Parse remaining string to get addresses of load balancers
+		parse_load_balancers(flag.Args(), *tunnel)
+
+		cfgs := make([]check_config, len(lb_list))
+		for i := range cfgs {
+			cfgs[i] = global_check_cfg
+		}
+		start_health_checks(cfgs)
+	}
+
+	write_state_file()
+	setup_reload_handler()
+
+	if *api_addr != "" {
+		start_status_api(*api_addr)
 	}
 
 	if *transparent_port != 0 {

@@ -79,6 +79,7 @@ function renderWans(status, stats) {
 			E('th', { 'class': 'th' }, _('Status')),
 			E('th', { 'class': 'th' }, _('For')),
 			E('th', { 'class': 'th' }, _('Checks OK / Failed')),
+			E('th', { 'class': 'th' }, _('Conns (active / total)')),
 			E('th', { 'class': 'th' }, _('RX / TX (interface)'))
 		])
 	]);
@@ -87,7 +88,7 @@ function renderWans(status, stats) {
 
 	if (!wans.length) {
 		table.appendChild(E('tr', { 'class': 'tr placeholder' }, [
-			E('td', { 'class': 'td', 'colspan': 8 },
+			E('td', { 'class': 'td', 'colspan': 9 },
 				_('No WAN backends configured. Add some under WAN Backends.'))
 		]));
 		return table;
@@ -105,6 +106,7 @@ function renderWans(status, stats) {
 			E('td', { 'class': 'td' }, statusDot(w.status, w.enabled)),
 			E('td', { 'class': 'td' }, formatSince(w.since)),
 			E('td', { 'class': 'td' }, '%d / %d'.format(w.checks_ok || 0, w.checks_failed || 0)),
+			E('td', { 'class': 'td' }, '%d / %d'.format(w.active_connections || 0, w.total_connections || 0)),
 			E('td', { 'class': 'td' },
 				formatBytes(st.rx_bytes) + ' / ' + formatBytes(st.tx_bytes))
 		]));

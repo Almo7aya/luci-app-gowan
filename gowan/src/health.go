@@ -73,27 +73,74 @@ type health_checker struct {
 	mu    sync.Mutex
 	state *health_state
 	check func() bool // substituted in tests
+	stop  chan struct{}
 }
 
+// Guarded by mutex: replaced wholesale on reload.
 var checkers []*health_checker
 
-func start_health_checks(cfg check_config) {
-	checkers = make([]*health_checker, len(lb_list))
-	for idx, lb := range lb_list {
+/*
+Starts one checker per backend; cfgs[i] belongs to lb_list[i]. Entries
+with check type "none" (or empty) get no checker. Backends that are
+currently DOWN keep their verdict — the state machine is seeded from
+the backend's current flag, not reset to optimistic.
+*/
+func start_health_checks(cfgs []check_config) {
+	mutex.Lock()
+	lbs := make([]*load_balancer, len(lb_list))
+	copy(lbs, lb_list)
+	mutex.Unlock()
+
+	started := 0
+	fresh := make([]*health_checker, len(lbs))
+	for idx, lb := range lbs {
+		if idx >= len(cfgs) || cfgs[idx].ctype == "none" || cfgs[idx].ctype == "" {
+			continue
+		}
 		hc := &health_checker{
 			lb:    lb,
-			cfg:   cfg,
-			state: new_health_state(cfg.fail, cfg.rise),
+			cfg:   cfgs[idx],
+			state: new_health_state(cfgs[idx].fail, cfgs[idx].rise),
+			stop:  make(chan struct{}),
 		}
+		mutex.Lock()
+		hc.state.up = lb.up
+		mutex.Unlock()
 		hc.check = hc.run_check
-		checkers[idx] = hc
-		go hc.loop()
+		fresh[idx] = hc
+		started++
 	}
-	log.Printf("[INFO] Health checks started: %s %s every %s (fail %d / rise %d)\n",
-		cfg.ctype, cfg.target, cfg.interval, cfg.fail, cfg.rise)
+
+	mutex.Lock()
+	checkers = fresh
+	mutex.Unlock()
+
+	for _, hc := range fresh {
+		if hc != nil {
+			go hc.loop()
+		}
+	}
+	if started > 0 {
+		log.Printf("[INFO] Health checks started for %d backend(s)\n", started)
+	}
+}
+
+func stop_health_checks() {
+	mutex.Lock()
+	old := checkers
+	checkers = nil
+	mutex.Unlock()
+
+	for _, hc := range old {
+		if hc != nil {
+			close(hc.stop)
+		}
+	}
 }
 
 func checker_for(lb *load_balancer) *health_checker {
+	mutex.Lock()
+	defer mutex.Unlock()
 	for _, hc := range checkers {
 		if hc != nil && hc.lb == lb {
 			return hc
@@ -115,15 +162,26 @@ func (lb *load_balancer) note_dial_failure() {
 func (hc *health_checker) loop() {
 	for {
 		hc.observe(hc.check())
-		time.Sleep(hc.cfg.interval)
+		select {
+		case <-hc.stop:
+			return
+		case <-time.After(hc.cfg.interval):
+		}
 	}
 }
 
 /*
 Feeds one result (periodic check or live dial failure) into the state
 machine and publishes flips: backend flag, counters, state file, hook.
+Stopped checkers (replaced by a reload) discard their in-flight result.
 */
 func (hc *health_checker) observe(ok bool) {
+	select {
+	case <-hc.stop:
+		return
+	default:
+	}
+
 	hc.mu.Lock()
 	flipped := hc.state.observe(ok)
 	up := hc.state.up

@@ -58,7 +58,8 @@ func dispatch_connection(local_conn net.Conn, remote_address string, socks bool)
 		if socks {
 			local_conn.Write([]byte{5, SUCCESS, 0, 1, 0, 0, 0, 0, 0, 0})
 		}
-		pipe_connections(local_conn, remote_conn)
+		lb.conn_started()
+		pipe_connections(local_conn, remote_conn, lb.conn_finished)
 		return
 	}
 }

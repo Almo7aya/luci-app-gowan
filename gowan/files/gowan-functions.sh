@@ -4,6 +4,7 @@
 
 . /lib/functions.sh
 . /lib/functions/network.sh
+. /usr/share/libubox/jshn.sh
 
 GOWAN_RUN_DIR=/var/run/gowan
 # shellcheck disable=SC2034  # consumed by the scripts sourcing this file
@@ -121,4 +122,65 @@ gowan_apply_nft() {
 gowan_teardown_acl() {
 	nft delete table inet gowan 2>/dev/null
 	return 0
+}
+
+# Emits one backend object into the jshn document being built by
+# gowan_render_backends. Per-WAN check_* options are optional overrides;
+# absent fields inherit the daemon's global -check-* flags.
+_gowan_render_wan() {
+	local section="$1" enabled iface ratio ip
+	local ctype ctarget cint ctmo cfail crise
+
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" -eq 0 ] && return 0
+	config_get iface "$section" interface
+	[ -n "$iface" ] || return 0
+
+	if ! gowan_resolve_wan "$iface" ip; then
+		logger -t gowan "WAN $section: interface $iface has no IPv4 address, skipping"
+		return 0
+	fi
+	config_get ratio "$section" ratio 1
+
+	config_get ctype "$section" check_type ""
+	config_get ctarget "$section" check_target ""
+	config_get cint "$section" check_interval ""
+	config_get ctmo "$section" check_timeout ""
+	config_get cfail "$section" check_fail_threshold ""
+	config_get crise "$section" check_rise_threshold ""
+
+	json_add_object ""
+	json_add_string name "$section"
+	json_add_string ip "$ip"
+	json_add_int ratio "$ratio"
+	if [ -n "$ctype$ctarget$cint$ctmo$cfail$crise" ]; then
+		json_add_object check
+		[ -n "$ctype" ] && json_add_string type "$ctype"
+		[ -n "$ctarget" ] && json_add_string target "$ctarget"
+		[ -n "$cint" ] && json_add_int interval "$cint"
+		[ -n "$ctmo" ] && json_add_int timeout "$ctmo"
+		[ -n "$cfail" ] && json_add_int fail "$cfail"
+		[ -n "$crise" ] && json_add_int rise "$crise"
+		json_close_object
+	fi
+	json_close_object
+
+	_gowan_backend_count=$((_gowan_backend_count + 1))
+}
+
+# Renders the daemon's backends file from UCI wan sections. Caller must
+# have run config_load gowan and network_flush_cache. Returns 1 when no
+# WAN is usable (file left untouched so the daemon keeps its last set).
+gowan_render_backends() {
+	_gowan_backend_count=0
+
+	json_init
+	json_add_array backends
+	config_foreach _gowan_render_wan wan
+	json_close_array
+
+	[ "$_gowan_backend_count" -gt 0 ] || return 1
+
+	json_dump > "$GOWAN_RUN_DIR/backends.json.tmp" &&
+		mv "$GOWAN_RUN_DIR/backends.json.tmp" "$GOWAN_RUN_DIR/backends.json"
 }

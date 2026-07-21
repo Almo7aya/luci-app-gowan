@@ -19,7 +19,7 @@ _health_field() {
 
 _add_wan_status() {
 	local section="$1" label iface ratio enabled ip device
-	local status since ok failed
+	local status since ok failed total active
 
 	config_get label "$section" label "$section"
 	config_get iface "$section" interface
@@ -37,11 +37,15 @@ _add_wan_status() {
 	since=0
 	ok=0
 	failed=0
+	total=0
+	active=0
 	if [ -n "$ip" ]; then
 		status=$(_health_field "$ip" status) || status="unknown"
 		since=$(_health_field "$ip" since) || since=0
 		ok=$(_health_field "$ip" checks_ok) || ok=0
 		failed=$(_health_field "$ip" checks_failed) || failed=0
+		total=$(_health_field "$ip" total_connections) || total=0
+		active=$(_health_field "$ip" active_connections) || active=0
 	fi
 
 	json_add_object ""
@@ -56,6 +60,8 @@ _add_wan_status() {
 	json_add_int since "${since:-0}"
 	json_add_int checks_ok "${ok:-0}"
 	json_add_int checks_failed "${failed:-0}"
+	json_add_int total_connections "${total:-0}"
+	json_add_int active_connections "${active:-0}"
 	json_close_object
 }
 

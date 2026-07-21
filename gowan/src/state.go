@@ -19,6 +19,7 @@ var on_change_cmd string
 var state_write_mu sync.Mutex
 
 type backend_state struct {
+	Name         string `json:"name"`
 	IP           string `json:"ip"`
 	Iface        string `json:"iface"`
 	Ratio        int    `json:"ratio"`
@@ -26,6 +27,8 @@ type backend_state struct {
 	Since        int64  `json:"since"`
 	ChecksOK     uint64 `json:"checks_ok"`
 	ChecksFailed uint64 `json:"checks_failed"`
+	TotalConns   uint64 `json:"total_connections"`
+	ActiveConns  int64  `json:"active_connections"`
 }
 
 func backend_ip(lb *load_balancer) string {
@@ -47,6 +50,7 @@ func snapshot_backends() []backend_state {
 			status = "up"
 		}
 		states[idx] = backend_state{
+			Name:         lb.name,
 			IP:           backend_ip(lb),
 			Iface:        lb.iface,
 			Ratio:        lb.contention_ratio,
@@ -54,6 +58,8 @@ func snapshot_backends() []backend_state {
 			Since:        lb.status_since,
 			ChecksOK:     lb.checks_ok,
 			ChecksFailed: lb.checks_failed,
+			TotalConns:   lb.total_conns,
+			ActiveConns:  lb.active_conns,
 		}
 	}
 	return states

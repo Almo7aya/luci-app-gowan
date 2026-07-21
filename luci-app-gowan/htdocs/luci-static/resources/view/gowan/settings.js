@@ -75,6 +75,17 @@ return view.extend({
 		o.depends('check_type', 'tcp');
 		o.depends('check_type', 'http');
 
+		s = m.section(form.NamedSection, 'main', 'gowan', _('Status API'),
+			_('Local JSON endpoint (127.0.0.1 only) for external monitoring: uptime, per-WAN health and connection counters at /status.'));
+
+		o = s.option(form.Flag, 'api_enabled', _('Enable status API'));
+		o.default = '0';
+
+		o = s.option(form.Value, 'api_port', _('API port'));
+		o.datatype = 'port';
+		o.default = '9080';
+		o.depends('api_enabled', '1');
+
 		s = m.section(form.NamedSection, 'main', 'gowan', _('Transparent Mode'),
 			_('Intercept ALL TCP traffic from the selected subnets and balance it across the WAN backends — no client configuration needed. Traffic to private/LAN destinations stays direct.'));
 

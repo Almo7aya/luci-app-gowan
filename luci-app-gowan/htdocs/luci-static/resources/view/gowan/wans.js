@@ -36,6 +36,40 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
+		// Per-WAN health check overrides — edit dialog only. Empty
+		// fields inherit the global settings.
+		o = s.option(form.ListValue, 'check_type', _('Check type override'),
+			_('Leave "inherit" to use the global health-check settings'));
+		o.modalonly = true;
+		o.value('', _('inherit'));
+		o.value('tcp', _('TCP connect'));
+		o.value('http', _('HTTP GET'));
+		o.value('none', _('Disabled'));
+
+		o = s.option(form.Value, 'check_target', _('Check target override'));
+		o.modalonly = true;
+		o.placeholder = _('inherit global');
+
+		o = s.option(form.Value, 'check_interval', _('Check interval override (s)'));
+		o.modalonly = true;
+		o.datatype = 'range(1,3600)';
+		o.placeholder = _('inherit');
+
+		o = s.option(form.Value, 'check_timeout', _('Check timeout override (s)'));
+		o.modalonly = true;
+		o.datatype = 'range(1,60)';
+		o.placeholder = _('inherit');
+
+		o = s.option(form.Value, 'check_fail_threshold', _('Fail threshold override'));
+		o.modalonly = true;
+		o.datatype = 'range(1,20)';
+		o.placeholder = _('inherit');
+
+		o = s.option(form.Value, 'check_rise_threshold', _('Rise threshold override'));
+		o.modalonly = true;
+		o.datatype = 'range(1,20)';
+		o.placeholder = _('inherit');
+
 		return m.render();
 	}
 });

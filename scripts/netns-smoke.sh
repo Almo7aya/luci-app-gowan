@@ -126,13 +126,20 @@ EOF
 chmod +x "$WORK/hook.sh"
 
 echo "== starting daemon"
+cat > "$WORK/backends.json" <<'EOF'
+{"backends": [
+  {"name": "wan1", "ip": "10.201.1.1", "ratio": 1},
+  {"name": "wan2", "ip": "10.201.2.1", "ratio": 1}
+]}
+EOF
+
 # 0.0.0.0 matches production: OUTPUT-hook REDIRECT may rewrite the
 # destination to a non-loopback local address.
 "$WORK/gowan" -lhost 0.0.0.0 -lport $PROXY_PORT -transparent $TRANS_PORT \
+	-backends-file "$WORK/backends.json" -api "127.0.0.1:11090" \
 	-check-type tcp -check-target "$TARGET:8080" \
 	-check-interval 1 -check-timeout 2 -check-fail 2 -check-rise 2 \
-	-state-file "$STATE" -on-change "$WORK/hook.sh" \
-	10.201.1.1@1 10.201.2.1@1 > "$DAEMON_LOG" 2>&1 &
+	-state-file "$STATE" -on-change "$WORK/hook.sh" > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 sleep 2
 kill -0 "$DAEMON_PID" 2>/dev/null || fail "daemon did not start"
@@ -230,5 +237,39 @@ nft delete table inet gowantest
 direct=$(curl -s --max-time 5 "http://127.0.0.1:$TRANS_PORT/" || true)
 [ -z "$direct" ] || fail "direct connection to transparent port returned data: '$direct'"
 echo "   direct connection to transparent port correctly dropped"
+
+echo "== test 5: SIGHUP hot reload"
+cat > "$WORK/backends.json" <<'EOF'
+{"backends": [{"name": "wan1", "ip": "10.201.1.1", "ratio": 1}]}
+EOF
+kill -HUP "$DAEMON_PID"
+sleep 1
+kill -0 "$DAEMON_PID" 2>/dev/null || fail "daemon died on SIGHUP"
+for _ in 1 2 3 4; do
+	body=$(fetch)
+	[ "$body" = "wan1" ] || fail "after dropping wan2 via SIGHUP, got '$body'"
+done
+echo "   backend removed via SIGHUP, same PID"
+
+cat > "$WORK/backends.json" <<'EOF'
+{"backends": [
+  {"name": "wan1", "ip": "10.201.1.1", "ratio": 1},
+  {"name": "wan2", "ip": "10.201.2.1", "ratio": 1}
+]}
+EOF
+kill -HUP "$DAEMON_PID"
+sleep 1
+seen2=0
+for _ in 1 2 3 4 5 6; do
+	[ "$(fetch)" = "wan2" ] && seen2=1
+done
+[ "$seen2" -eq 1 ] || fail "wan2 never returned after SIGHUP re-add"
+echo "   backend re-added via SIGHUP"
+
+echo "== test 6: status API"
+api=$(curl -s --max-time 5 "http://127.0.0.1:11090/status" || true)
+echo "$api" | grep -q '"backends"' || fail "status API returned no backends: '$api'"
+echo "$api" | grep -q '"wan1"' || fail "status API missing wan1: '$api'"
+echo "   /status serves backend JSON"
 
 echo "PASS: all integration assertions held"
