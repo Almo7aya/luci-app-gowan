@@ -151,6 +151,27 @@ do_log() {
 	json_dump
 }
 
+do_speedtest() {
+	local input section
+
+	read -r input
+	section=$(jsonfilter -s "$input" -e '@.section' 2>/dev/null)
+	# Validate against real wan section names before touching a shell.
+	config_load gowan
+	local found=0
+	_gowan_match_section() { [ "$1" = "$section" ] && found=1; }
+	config_foreach _gowan_match_section wan
+	if [ "$found" -ne 1 ]; then
+		json_init
+		json_add_string wan "$section"
+		json_add_string status "invalid_section"
+		json_dump
+		return
+	fi
+
+	/usr/lib/gowan/speedtest.sh "$section"
+}
+
 case "$1" in
 	list)
 		json_init
@@ -161,6 +182,9 @@ case "$1" in
 		json_add_object log
 		json_add_int lines 100
 		json_close_object
+		json_add_object speedtest
+		json_add_string section ""
+		json_close_object
 		json_dump
 		;;
 	call)
@@ -168,6 +192,7 @@ case "$1" in
 			status) do_status ;;
 			stats) do_stats ;;
 			log) do_log ;;
+			speedtest) do_speedtest ;;
 			*) exit 1 ;;
 		esac
 		;;

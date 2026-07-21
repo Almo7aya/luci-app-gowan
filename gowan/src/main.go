@@ -317,7 +317,12 @@ func main() {
 	var on_change = flag.String("on-change", "", "Run '<cmd> <backend-ip> <old-state> <new-state>' on every health flip")
 	var transparent_port = flag.Int("transparent", 0, "Also accept nft/iptables-REDIRECTed connections on this port (Linux only, 0 = off)")
 	var backends_path = flag.String("backends-file", "", "Load backends (with per-backend check config) from this JSON file; SIGHUP re-reads it without dropping connections")
+	var policy_path = flag.String("policy-file", "", "Load client-IP policy rules from this JSON file (SIGHUP re-reads it)")
 	var api_addr = flag.String("api", "", "Serve GET /status as JSON on this address, e.g. 127.0.0.1:9080 (empty = off)")
+	var sticky = flag.Bool("sticky", false, "Pin each client IP to the same backend for the session")
+	var sticky_timeout = flag.Int("sticky-timeout", 300, "Sticky mapping lifetime in seconds")
+	var auth_u = flag.String("auth-user", "", "SOCKS5 username (enables RFC 1929 auth on the SOCKS listener)")
+	var auth_p = flag.String("auth-pass", "", "SOCKS5 password")
 
 	flag.Parse()
 	if *detect {
@@ -389,6 +394,21 @@ func main() {
 			cfgs[i] = global_check_cfg
 		}
 		start_health_checks(cfgs)
+	}
+
+	auth_user = *auth_u
+	auth_pass = *auth_p
+	if auth_enabled() {
+		log.Println("[INFO] SOCKS5 username/password authentication enabled")
+	}
+	configure_sticky(*sticky, time.Duration(*sticky_timeout)*time.Second)
+	if *sticky {
+		log.Printf("[INFO] Sticky sessions enabled (timeout %ds)\n", *sticky_timeout)
+	}
+
+	if *policy_path != "" {
+		policy_file = *policy_path
+		reload_policies()
 	}
 
 	write_state_file()

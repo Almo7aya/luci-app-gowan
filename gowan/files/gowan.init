@@ -28,12 +28,19 @@ _gowan_read_config() {
 	config_get_bool BLOCK_QUIC main block_quic 1
 	config_get_bool API_ENABLED main api_enabled 0
 	config_get API_PORT main api_port 9080
+	config_get_bool STICKY main sticky 0
+	config_get STICKY_TIMEOUT main sticky_timeout 300
+	config_get_bool AUTH_ENABLED auth enabled 0
+	config_get AUTH_USER auth username ''
+	config_get AUTH_PASS auth password ''
 }
 
-# Anything that requires re-binding a socket. When this signature is
-# unchanged, a config reload is a pure SIGHUP (no dropped connections).
+# Anything the daemon can only pick up at startup (listener sockets and
+# process-level flags). When this signature is unchanged, a config
+# reload is a pure SIGHUP (no dropped connections). Policies and per-WAN
+# backend/check settings are re-read on SIGHUP, so they are NOT here.
 _gowan_listener_sig() {
-	echo "$ENABLED/$LISTEN_HOST:$LISTEN_PORT/t$TRANSPARENT:$TPORT/a$API_ENABLED:$API_PORT/q$LOG_CONNECTIONS/c$CTYPE:$CTARGET:$CINT:$CTMO:$CFAIL:$CRISE"
+	echo "$ENABLED/$LISTEN_HOST:$LISTEN_PORT/t$TRANSPARENT:$TPORT/a$API_ENABLED:$API_PORT/q$LOG_CONNECTIONS/c$CTYPE:$CTARGET:$CINT:$CTMO:$CFAIL:$CRISE/s$STICKY:$STICKY_TIMEOUT/u$AUTH_ENABLED:$AUTH_USER:$AUTH_PASS"
 }
 
 start_service() {
@@ -49,6 +56,7 @@ start_service() {
 		logger -t gowan -p daemon.err "no usable WAN backends; not starting"
 		return 1
 	fi
+	gowan_render_policies
 
 	gowan_apply_nft "$LISTEN_PORT" "$TRANSPARENT" "$TPORT" "$BLOCK_QUIC" || \
 		logger -t gowan -p daemon.err "failed to apply gowan nftables rules"
@@ -58,9 +66,15 @@ start_service() {
 	procd_open_instance proxy
 	procd_set_param command $PROG -lhost "$LISTEN_HOST" -lport "$LISTEN_PORT" \
 		-backends-file "$GOWAN_RUN_DIR/backends.json" \
-		-state-file "$GOWAN_STATE_FILE"
+		-policy-file "$GOWAN_RUN_DIR/policies.json" \
+		-state-file "$GOWAN_STATE_FILE" \
+		-on-change /usr/lib/gowan/notify.sh
 	[ "$TRANSPARENT" -eq 1 ] && procd_append_param command -transparent "$TPORT"
 	[ "$API_ENABLED" -eq 1 ] && procd_append_param command -api "127.0.0.1:$API_PORT"
+	[ "$STICKY" -eq 1 ] && procd_append_param command -sticky -sticky-timeout "$STICKY_TIMEOUT"
+	if [ "$AUTH_ENABLED" -eq 1 ] && [ -n "$AUTH_USER" ]; then
+		procd_append_param command -auth-user "$AUTH_USER" -auth-pass "$AUTH_PASS"
+	fi
 	if [ "$CTYPE" != "none" ]; then
 		procd_append_param command \
 			-check-type "$CTYPE" -check-target "$CTARGET" \
@@ -103,6 +117,7 @@ reload_service() {
 	gowan_apply_nft "$LISTEN_PORT" "$TRANSPARENT" "$TPORT" "$BLOCK_QUIC" || \
 		logger -t gowan -p daemon.err "failed to apply gowan nftables rules"
 
+	gowan_render_policies
 	if gowan_render_backends; then
 		procd_send_signal gowan proxy SIGHUP
 		logger -t gowan "configuration reloaded via SIGHUP"

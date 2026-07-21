@@ -110,6 +110,68 @@ return view.extend({
 		o.default = '1';
 		o.depends('transparent', '1');
 
+		s = m.section(form.NamedSection, 'main', 'gowan', _('Sticky Sessions'),
+			_('Pin each client IP to the same backend for the duration of a session — useful for sites that dislike a session hopping between source IPs.'));
+
+		o = s.option(form.Flag, 'sticky', _('Enable sticky sessions'));
+		o.default = '0';
+
+		o = s.option(form.Value, 'sticky_timeout', _('Session timeout (s)'),
+			_('A client mapping expires after this many seconds of inactivity'));
+		o.datatype = 'range(10,86400)';
+		o.default = '300';
+		o.depends('sticky', '1');
+
+		// SOCKS5 authentication lives in its own UCI section.
+		s = m.section(form.NamedSection, 'auth', 'auth', _('SOCKS5 Authentication'),
+			_('Require a username and password on the SOCKS5 listener (RFC 1929). Transparent mode is unaffected — it is guarded by Access Control.'));
+		s.anonymous = true;
+
+		o = s.option(form.Flag, 'enabled', _('Require authentication'));
+		o.default = '0';
+
+		o = s.option(form.Value, 'username', _('Username'));
+		o.depends('enabled', '1');
+		o.rmempty = false;
+
+		o = s.option(form.Value, 'password', _('Password'));
+		o.password = true;
+		o.depends('enabled', '1');
+		o.rmempty = false;
+
+		// Failover notifications.
+		s = m.section(form.NamedSection, 'alerts', 'notify', _('Failover Notifications'),
+			_('Send an alert when a WAN goes down or comes back up. Requires curl on the router.'));
+		s.anonymous = true;
+
+		o = s.option(form.Flag, 'enabled', _('Enable notifications'));
+		o.default = '0';
+
+		o = s.option(form.ListValue, 'type', _('Channel'));
+		o.value('telegram', _('Telegram'));
+		o.value('discord', _('Discord webhook'));
+		o.value('webhook', _('Generic webhook'));
+		o.default = 'telegram';
+		o.depends('enabled', '1');
+
+		o = s.option(form.Value, 'telegram_bot_token', _('Telegram bot token'));
+		o.depends({ enabled: '1', type: 'telegram' });
+
+		o = s.option(form.Value, 'telegram_chat_id', _('Telegram chat ID'));
+		o.depends({ enabled: '1', type: 'telegram' });
+
+		o = s.option(form.Value, 'webhook_url', _('Webhook URL'));
+		o.depends({ enabled: '1', type: 'discord' });
+		o.depends({ enabled: '1', type: 'webhook' });
+
+		o = s.option(form.Flag, 'on_wan_down', _('Notify on WAN down'));
+		o.default = '1';
+		o.depends('enabled', '1');
+
+		o = s.option(form.Flag, 'on_wan_up', _('Notify on WAN up'));
+		o.default = '1';
+		o.depends('enabled', '1');
+
 		return m.render();
 	}
 });

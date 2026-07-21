@@ -32,12 +32,58 @@ func client_greeting(conn net.Conn) (byte, []byte, error) {
 
 /*
  */
-func servers_choice(conn net.Conn) error {
-
-	if nWrite, err := conn.Write([]byte{5, 0}); err != nil || nWrite != 2 {
-		return errors.New("[WARN] servers choice failed")
+func servers_choice(conn net.Conn, auth_methods []byte) error {
+	if !auth_enabled() {
+		if nWrite, err := conn.Write([]byte{5, NOAUTH}); err != nil || nWrite != 2 {
+			return errors.New("[WARN] servers choice failed")
+		}
+		return nil
 	}
-	return nil
+
+	for _, m := range auth_methods {
+		if m == USERNAME_PASSWORD {
+			if nWrite, err := conn.Write([]byte{5, USERNAME_PASSWORD}); err != nil || nWrite != 2 {
+				return errors.New("[WARN] servers choice failed")
+			}
+			return nil
+		}
+	}
+	conn.Write([]byte{5, NO_ACCEPTABLE_METHOD})
+	return errors.New("[WARN] client offered no acceptable auth method")
+}
+
+/*
+RFC 1929 username/password sub-negotiation. Called only when auth is
+enabled and USERNAME_PASSWORD was selected.
+*/
+func handle_socks_auth(conn net.Conn) error {
+	header := make([]byte, 2)
+	if nRead, err := conn.Read(header); err != nil || nRead != 2 || header[0] != 1 {
+		return errors.New("[WARN] bad auth version")
+	}
+
+	ulen := int(header[1])
+	uname := make([]byte, ulen)
+	if nRead, err := conn.Read(uname); err != nil || nRead != ulen {
+		return errors.New("[WARN] auth username read failed")
+	}
+
+	plenbuf := make([]byte, 1)
+	if nRead, err := conn.Read(plenbuf); err != nil || nRead != 1 {
+		return errors.New("[WARN] auth password length read failed")
+	}
+	plen := int(plenbuf[0])
+	passwd := make([]byte, plen)
+	if nRead, err := conn.Read(passwd); err != nil || nRead != plen {
+		return errors.New("[WARN] auth password read failed")
+	}
+
+	if credentials_ok(string(uname), string(passwd)) {
+		conn.Write([]byte{1, 0})
+		return nil
+	}
+	conn.Write([]byte{1, 1})
+	return errors.New("[WARN] authentication failed")
 }
 
 /*
@@ -127,14 +173,22 @@ func client_conection_request(conn net.Conn) (string, error) {
  */
 func handle_socks_connection(conn net.Conn) (string, error) {
 
-	if _, _, err := client_greeting(conn); err != nil {
+	_, auth_methods, err := client_greeting(conn)
+	if err != nil {
 		log.Println(err)
 		return "", err
 	}
 
-	if err := servers_choice(conn); err != nil {
+	if err := servers_choice(conn, auth_methods); err != nil {
 		log.Println(err)
 		return "", err
+	}
+
+	if auth_enabled() {
+		if err := handle_socks_auth(conn); err != nil {
+			log.Println(err)
+			return "", err
+		}
 	}
 
 	address, err := client_conection_request(conn)

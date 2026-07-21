@@ -26,6 +26,7 @@ STATE="$WORK/health.json"
 HOOK_LOG="$WORK/hook.log"
 DAEMON_LOG="$WORK/daemon.log"
 DAEMON_PID=""
+DAEMON2_PID=""
 
 fail() {
 	echo "FAIL: $*" >&2
@@ -41,6 +42,9 @@ fail() {
 cleanup() {
 	if [ -n "$DAEMON_PID" ]; then
 		kill "$DAEMON_PID" 2>/dev/null || true
+	fi
+	if [ -n "$DAEMON2_PID" ]; then
+		kill "$DAEMON2_PID" 2>/dev/null || true
 	fi
 	nft delete table inet gowantest 2>/dev/null || true
 	# ip netns del does NOT kill processes inside the namespace — the
@@ -271,5 +275,42 @@ api=$(curl -s --max-time 5 "http://127.0.0.1:11090/status" || true)
 echo "$api" | grep -q '"backends"' || fail "status API returned no backends: '$api'"
 echo "$api" | grep -q '"wan1"' || fail "status API missing wan1: '$api'"
 echo "   /status serves backend JSON"
+
+echo "== test 7+8: SOCKS5 auth + client-IP policy (second daemon)"
+# A second daemon on its own port with auth on and a policy pinning the
+# local client (127.0.0.1) to wan2. Keeps tests 1-6 policy-free.
+cat > "$WORK/policy.json" <<'EOF'
+{"policies": [{"type": "client_ip", "match": "127.0.0.1", "wan": "wan2"}]}
+EOF
+"$WORK/gowan" -lhost 127.0.0.1 -lport 11082 \
+	-backends-file "$WORK/backends.json" -policy-file "$WORK/policy.json" \
+	-auth-user gowan -auth-pass s3cret -check-type none \
+	> "$WORK/daemon2.log" 2>&1 &
+DAEMON2_PID=$!
+sleep 1
+kill -0 "$DAEMON2_PID" 2>/dev/null || fail "second daemon did not start"
+
+# No credentials: must be refused.
+if curl -s --max-time 5 --socks5 127.0.0.1:11082 "http://$TARGET:8080/index.html" >/dev/null 2>&1; then
+	fail "auth: unauthenticated request should have been refused"
+fi
+echo "   unauthenticated request refused"
+
+# Wrong credentials: refused.
+if curl -s --max-time 5 --proxy-user gowan:wrong \
+	--socks5 127.0.0.1:11082 "http://$TARGET:8080/index.html" >/dev/null 2>&1; then
+	fail "auth: wrong password should have been refused"
+fi
+echo "   wrong password refused"
+
+# Correct credentials: succeeds, and policy pins the client to wan2.
+for _ in 1 2 3 4; do
+	body=$(curl -s --max-time 5 --proxy-user gowan:s3cret \
+		--socks5 127.0.0.1:11082 "http://$TARGET:8080/index.html" || true)
+	[ "$body" = "wan2" ] || fail "auth+policy: expected wan2, got '$body'"
+done
+echo "   authenticated request pinned to wan2 by policy"
+
+kill "$DAEMON2_PID" 2>/dev/null || true
 
 echo "PASS: all integration assertions held"

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=gowan
-PKG_VERSION:=0.3.0
+PKG_VERSION:=0.4.0
 PKG_RELEASE:=1
 
 # Source is VENDORED in ./src — an upstream go-dispatch-proxy snapshot (MIT)
@@ -59,6 +59,8 @@ define Package/gowan/install
 
 	$(INSTALL_DIR) $(1)/usr/lib/gowan
 	$(INSTALL_DATA) ./files/gowan-functions.sh $(1)/usr/lib/gowan/functions.sh
+	$(INSTALL_BIN) ./files/gowan-notify.sh $(1)/usr/lib/gowan/notify.sh
+	$(INSTALL_BIN) ./files/gowan-speedtest.sh $(1)/usr/lib/gowan/speedtest.sh
 
 	$(INSTALL_DIR) $(1)/usr/libexec/rpcd
 	$(INSTALL_BIN) ./files/gowan-rpcd $(1)/usr/libexec/rpcd/gowan

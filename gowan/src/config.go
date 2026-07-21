@@ -39,6 +39,29 @@ type backends_file_json struct {
 	Backends []backend_json `json:"backends"`
 }
 
+// Policies file: rendered from UCI, re-read on SIGHUP alongside backends.
+type policy_json struct {
+	Type  string `json:"type"`
+	Match string `json:"match"`
+	Wan   string `json:"wan"`
+}
+
+type policies_file_json struct {
+	Policies []policy_json `json:"policies"`
+}
+
+func load_policies_file(path string) ([]policy_json, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var doc policies_file_json
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("invalid policies file: %w", err)
+	}
+	return doc.Policies, nil
+}
+
 // The global check settings from flags; per-backend file entries
 // override individual fields.
 var global_check_cfg check_config

@@ -13,6 +13,22 @@ import (
 // Path of the backends file (-backends-file); empty = flags-only mode.
 var backends_file string
 
+// Path of the policies file (-policy-file); empty = no policy routing.
+var policy_file string
+
+// Re-reads the policies file if configured. Missing file = clear rules.
+func reload_policies() {
+	if policy_file == "" {
+		return
+	}
+	list, err := load_policies_file(policy_file)
+	if err != nil {
+		log.Println("[WARN] policy reload failed, keeping current rules:", err)
+		return
+	}
+	set_policies(list)
+}
+
 func setup_reload_handler() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGHUP)
@@ -41,6 +57,7 @@ func reload_backends() {
 
 	n := apply_backends(list)
 	if n > 0 {
+		reload_policies()
 		log.Printf("[INFO] reloaded: %d backend(s) active\n", n)
 		write_state_file()
 	}

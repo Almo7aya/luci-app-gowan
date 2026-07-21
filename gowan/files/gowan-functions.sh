@@ -184,3 +184,32 @@ gowan_render_backends() {
 	json_dump > "$GOWAN_RUN_DIR/backends.json.tmp" &&
 		mv "$GOWAN_RUN_DIR/backends.json.tmp" "$GOWAN_RUN_DIR/backends.json"
 }
+
+_gowan_render_policy() {
+	local section="$1" enabled ptype match wan
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" -eq 0 ] && return 0
+	config_get ptype "$section" type ""
+	config_get match "$section" match ""
+	config_get wan "$section" wan ""
+	# Only client_ip is enforced by the daemon today.
+	[ "$ptype" = "client_ip" ] || return 0
+	[ -n "$match" ] && [ -n "$wan" ] || return 0
+
+	json_add_object ""
+	json_add_string type "$ptype"
+	json_add_string match "$match"
+	json_add_string wan "$wan"
+	json_close_object
+}
+
+# Renders the daemon's policy file from UCI policy sections. Always
+# writes a valid file (possibly an empty list).
+gowan_render_policies() {
+	json_init
+	json_add_array policies
+	config_foreach _gowan_render_policy policy
+	json_close_array
+	json_dump > "$GOWAN_RUN_DIR/policies.json.tmp" &&
+		mv "$GOWAN_RUN_DIR/policies.json.tmp" "$GOWAN_RUN_DIR/policies.json"
+}

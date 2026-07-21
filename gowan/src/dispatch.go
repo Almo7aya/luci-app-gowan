@@ -34,9 +34,10 @@ reply codes; transparent connections get no protocol bytes.
 */
 func dispatch_connection(local_conn net.Conn, remote_address string, socks bool) {
 	tried := new(big.Int)
+	client_ip := client_ip_of(local_conn)
 
 	for {
-		lb, i := get_load_balancer(tried)
+		lb, i := pick_backend(client_ip, tried)
 		if lb == nil {
 			log.Println("[WARN]", remote_address, "all load balancers failed")
 			if socks {
