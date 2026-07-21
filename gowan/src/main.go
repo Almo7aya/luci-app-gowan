@@ -288,6 +288,7 @@ func main() {
 	var check_rise = flag.Int("check-rise", 2, "Consecutive successes before a backend is marked UP")
 	var state_path = flag.String("state-file", "", "Write backend health state as JSON to this file")
 	var on_change = flag.String("on-change", "", "Run '<cmd> <backend-ip> <old-state> <new-state>' on every health flip")
+	var transparent_port = flag.Int("transparent", 0, "Also accept nft/iptables-REDIRECTed connections on this port (Linux only, 0 = off)")
 
 	flag.Parse()
 	if *detect {
@@ -306,6 +307,13 @@ func main() {
 	// Check for valid port
 	if *lport < 1 || *lport > 65535 {
 		log.Fatal("[FATAL] Invalid port ", *lport)
+	}
+
+	if *transparent_port < 0 || *transparent_port > 65535 || *transparent_port == *lport {
+		log.Fatal("[FATAL] Invalid transparent port ", *transparent_port)
+	}
+	if *transparent_port != 0 && *tunnel {
+		log.Fatal("[FATAL] transparent mode is not available in tunnel mode")
 	}
 
 	switch *check_type {
@@ -334,6 +342,10 @@ func main() {
 				rise:     *check_rise,
 			})
 		}
+	}
+
+	if *transparent_port != 0 {
+		start_transparent_listener(*lhost, *transparent_port)
 	}
 
 	local_bind_address := fmt.Sprintf("%s:%d", *lhost, *lport)

@@ -20,6 +20,7 @@ set -eu
 SRC_DIR=$(dirname "$0")/../gowan/src
 WORK=$(mktemp -d)
 PROXY_PORT=11080
+TRANS_PORT=11081
 TARGET=10.99.99.99
 STATE="$WORK/health.json"
 HOOK_LOG="$WORK/hook.log"
@@ -29,7 +30,11 @@ DAEMON_PID=""
 fail() {
 	echo "FAIL: $*" >&2
 	echo "--- daemon log ---" >&2
-	cat "$DAEMON_LOG" 2>/dev/null >&2 || true
+	cat "$DAEMON_LOG" >&2 2>/dev/null || true
+	echo "--- server logs ---" >&2
+	cat "$WORK"/server*.log >&2 2>/dev/null || true
+	echo "--- ns1 listeners ---" >&2
+	ip netns exec gowan-ns1 ss -tlnp >&2 2>/dev/null || true
 	exit 1
 }
 
@@ -37,6 +42,11 @@ cleanup() {
 	if [ -n "$DAEMON_PID" ]; then
 		kill "$DAEMON_PID" 2>/dev/null || true
 	fi
+	nft delete table inet gowantest 2>/dev/null || true
+	# ip netns del does NOT kill processes inside the namespace — the
+	# http servers would linger (and pin the old netns) forever.
+	ip netns pids gowan-ns1 2>/dev/null | xargs -r kill 2>/dev/null || true
+	ip netns pids gowan-ns2 2>/dev/null | xargs -r kill 2>/dev/null || true
 	ip netns del gowan-ns1 2>/dev/null || true
 	ip netns del gowan-ns2 2>/dev/null || true
 	rm -rf "$WORK"
@@ -49,6 +59,15 @@ echo "== building gowan"
 ( cd "$SRC_DIR" && go build -o "$WORK/gowan" . )
 
 echo "== setting up namespaces"
+# Remove leftovers from a previous aborted run so re-runs are clean.
+ip netns del gowan-ns1 2>/dev/null || true
+ip netns del gowan-ns2 2>/dev/null || true
+ip link del v1h 2>/dev/null || true
+ip link del v2h 2>/dev/null || true
+ip route del "$TARGET/32" 2>/dev/null || true
+ip route del "$TARGET/32" 2>/dev/null || true
+nft delete table inet gowantest 2>/dev/null || true
+
 setup_wan() {
 	# $1 = index, $2 = host ip, $3 = ns ip, $4 = payload
 	ip netns add "gowan-ns$1"
@@ -65,11 +84,36 @@ setup_wan() {
 		"net.ipv4.conf.v${1}n.rp_filter=0"
 	ip route add "$TARGET/32" via "$3" dev "v${1}h" metric "${1}00"
 
-	mkdir -p "$WORK/www$1"
-	printf '%s' "$4" > "$WORK/www$1/index.html"
-	ip netns exec "gowan-ns$1" python3 -m http.server 8080 \
-		--bind "$TARGET" --directory "$WORK/www$1" >/dev/null 2>&1 &
+	ip netns exec "gowan-ns$1" python3 "$WORK/srv.py" "$TARGET" 8080 "$4" \
+		> "$WORK/server$1.log" 2>&1 &
 }
+
+# Minimal HTTP responder. Deliberately NOT python3 -m http.server: that
+# blocks in socket.getfqdn() (reverse DNS) between bind() and listen(),
+# which hangs forever inside a namespace without working DNS — the
+# socket sits bound-but-not-listening and every connect gets RST.
+cat > "$WORK/srv.py" <<'EOF'
+import socket, sys
+addr, port, payload = sys.argv[1], int(sys.argv[2]), sys.argv[3].encode()
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind((addr, port))
+s.listen(16)
+resp = (b"HTTP/1.0 200 OK\r\nContent-Length: %d\r\n\r\n" % len(payload)) + payload
+while True:
+    c, _ = s.accept()
+    try:
+        c.settimeout(2)
+        try:
+            c.recv(1024)
+        except OSError:
+            pass
+        c.sendall(resp)
+    except OSError:
+        pass
+    finally:
+        c.close()
+EOF
 
 setup_wan 1 10.201.1.1 10.201.1.2 wan1
 setup_wan 2 10.201.2.1 10.201.2.2 wan2
@@ -82,7 +126,9 @@ EOF
 chmod +x "$WORK/hook.sh"
 
 echo "== starting daemon"
-"$WORK/gowan" -lhost 127.0.0.1 -lport $PROXY_PORT \
+# 0.0.0.0 matches production: OUTPUT-hook REDIRECT may rewrite the
+# destination to a non-loopback local address.
+"$WORK/gowan" -lhost 0.0.0.0 -lport $PROXY_PORT -transparent $TRANS_PORT \
 	-check-type tcp -check-target "$TARGET:8080" \
 	-check-interval 1 -check-timeout 2 -check-fail 2 -check-rise 2 \
 	-state-file "$STATE" -on-change "$WORK/hook.sh" \
@@ -154,5 +200,35 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ "$recovered" -eq 1 ] || fail "wan1 never rejoined the rotation after recovery"
 echo "   backend rejoined rotation"
+
+echo "== test 4: transparent mode (SO_ORIGINAL_DST via nft redirect)"
+# Local curls traverse the OUTPUT hook, so redirect there — same
+# conntrack mechanics as the router's prerouting redirect. Scope the
+# rule to non-root sockets: on a router the daemon's own dials never
+# traverse the prerouting chain, but in this OUTPUT-hook simulation
+# they would match and loop the proxy into itself — skuid emulates the
+# hook-placement exemption. The client curls run as nobody.
+nft add table inet gowantest
+nft "add chain inet gowantest out { type nat hook output priority -100 ; }"
+nft "add rule inet gowantest out meta skuid != 0 ip daddr $TARGET tcp dport 8080 redirect to :$TRANS_PORT"
+
+thits1=0; thits2=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	body=$(runuser -u nobody -- curl -s --max-time 5 "http://$TARGET:8080/index.html" || true)
+	case "$body" in
+		wan1) thits1=$((thits1 + 1)) ;;
+		wan2) thits2=$((thits2 + 1)) ;;
+		*) fail "transparent: unexpected response '$body'" ;;
+	esac
+done
+echo "   transparent wan1=$thits1 wan2=$thits2"
+[ "$thits1" -eq 5 ] || fail "transparent 1:1 ratio must split 10 requests 5/5, got $thits1/$thits2"
+
+# Direct connections to the transparent port (no redirect) must be
+# dropped, not looped back into the proxy.
+nft delete table inet gowantest
+direct=$(curl -s --max-time 5 "http://127.0.0.1:$TRANS_PORT/" || true)
+[ -z "$direct" ] || fail "direct connection to transparent port returned data: '$direct'"
+echo "   direct connection to transparent port correctly dropped"
 
 echo "PASS: all integration assertions held"

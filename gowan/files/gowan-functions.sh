@@ -39,20 +39,66 @@ _gowan_emit_acl_rule() {
 	config_list_foreach "$section" subnet _gowan_emit_subnet
 }
 
-# gowan_apply_acl <listen-port>
-# Materializes the ACL into a dedicated nftables table guarding the SOCKS
-# port on the input chain. Idempotent: replaces any previous gowan table.
-# Independent from fw4's table, so firewall reloads never wipe it.
-gowan_apply_acl() {
-	local port="$1" default rules tail_rule=""
+# Destination ranges that must never be intercepted: local, private,
+# CGNAT, link-local, multicast, broadcast. LAN-to-LAN and LAN-to-router
+# traffic stays direct.
+GOWAN_NO_INTERCEPT='0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4'
 
-	case "$port" in
-		''|*[!0-9]*) return 1 ;;
-	esac
+# Validates and joins the transparent_subnet list into "a, b, c" form
+# for an nft anonymous set. Empty result = nothing valid to intercept.
+_gowan_transparent_subnets() {
+	local subnets="" s
+	config_get s main transparent_subnet
+	for s in $s; do
+		case "$s" in
+			*[!0-9./]*) continue ;;
+		esac
+		subnets="${subnets:+$subnets, }$s"
+	done
+	echo "$subnets"
+}
+
+# gowan_apply_nft <socks-port> <transparent-enabled> <transparent-port> <block-quic>
+# Materializes the whole gowan ruleset into a dedicated nftables table:
+# input-chain ACL guarding both listener ports, plus (when enabled) the
+# transparent prerouting redirect and the QUIC block. Idempotent —
+# replaces any previous gowan table. Independent from fw4's table, so
+# firewall reloads never wipe it.
+gowan_apply_nft() {
+	local socks_port="$1" transparent="$2" tport="$3" block_quic="$4"
+	local default rules tail_rule="" guarded_ports subnets extra=""
+
+	case "$socks_port" in ''|*[!0-9]*) return 1 ;; esac
+	case "$tport" in ''|*[!0-9]*) return 1 ;; esac
 
 	config_get default main acl_default deny
 	rules="$(config_foreach _gowan_emit_acl_rule acl)"
 	[ "$default" = "deny" ] && tail_rule="		reject with tcp reset"
+
+	guarded_ports="$socks_port"
+	if [ "$transparent" = "1" ]; then
+		guarded_ports="$socks_port, $tport"
+		subnets="$(_gowan_transparent_subnets)"
+
+		if [ -n "$subnets" ]; then
+			extra="
+	chain transparent {
+		type nat hook prerouting priority dstnat; policy accept;
+		ip daddr { $GOWAN_NO_INTERCEPT } return
+		ip saddr { $subnets } meta l4proto tcp redirect to :$tport
+	}"
+			if [ "$block_quic" = "1" ]; then
+				extra="$extra
+	chain quic {
+		type filter hook forward priority 0; policy accept;
+		ip daddr { $GOWAN_NO_INTERCEPT } return
+		ip saddr { $subnets } udp dport 443 reject
+	}"
+			fi
+		else
+			logger -t gowan "transparent mode enabled but no valid transparent_subnet configured, not intercepting"
+		fi
+	fi
 
 	nft -f - <<-EOF
 		table inet gowan
@@ -60,13 +106,14 @@ gowan_apply_acl() {
 		table inet gowan {
 			chain input {
 				type filter hook input priority -1; policy accept;
-				tcp dport $port jump acl
+				tcp dport { $guarded_ports } jump acl
 			}
 			chain acl {
 				iifname "lo" accept
 		$rules
 		$tail_rule
 			}
+		$extra
 		}
 	EOF
 }

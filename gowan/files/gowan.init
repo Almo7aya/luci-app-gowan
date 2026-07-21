@@ -29,6 +29,7 @@ append_wan_arg() {
 start_service() {
 	local enabled listen_host listen_port log_connections
 	local ctype ctarget cint ctmo cfail crise
+	local transparent tport block_quic
 
 	config_load gowan
 	network_flush_cache
@@ -45,6 +46,9 @@ start_service() {
 	config_get ctmo main check_timeout 5
 	config_get cfail main check_fail_threshold 3
 	config_get crise main check_rise_threshold 2
+	config_get_bool transparent main transparent 0
+	config_get tport main transparent_port 1081
+	config_get_bool block_quic main block_quic 1
 
 	mkdir -p "$GOWAN_RUN_DIR"
 
@@ -55,11 +59,12 @@ start_service() {
 		return 1
 	fi
 
-	gowan_apply_acl "$listen_port" || \
-		logger -t gowan -p daemon.err "failed to apply ACL nftables rules"
+	gowan_apply_nft "$listen_port" "$transparent" "$tport" "$block_quic" || \
+		logger -t gowan -p daemon.err "failed to apply gowan nftables rules"
 
 	procd_open_instance proxy
 	procd_set_param command $PROG -lhost "$listen_host" -lport "$listen_port"
+	[ "$transparent" -eq 1 ] && procd_append_param command -transparent "$tport"
 	if [ "$ctype" != "none" ]; then
 		procd_append_param command \
 			-check-type "$ctype" -check-target "$ctarget" \

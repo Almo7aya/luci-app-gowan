@@ -165,7 +165,7 @@
 
 | # | Feature | Description |
 |---|---------|-------------|
-| 13 | **Transparent proxy mode** | Flagship. nft `redirect` + `-transparent` listener reading `SO_ORIGINAL_DST`: every LAN TCP connection balanced with zero client config. Includes QUIC-block rule (UDP/443 → TCP fallback). SOCKS5 listener remains alongside. Replaces the old redsocks/tun2socks plan. |
+| 13 | **Transparent proxy mode** ✅ *shipped in v0.2.0* | Flagship. nft `redirect` + `-transparent` listener reading `SO_ORIGINAL_DST`: every LAN TCP connection balanced with zero client config. Includes QUIC-block rule (UDP/443 → TCP fallback). SOCKS5 listener remains alongside. Replaces the old redsocks/tun2socks plan. Verified on hardware 2026-07-21. |
 | 14 | Promote `gowan/src/` to standalone repo | When it earns it (transparent mode shipped, or outside interest); config file, hot reload, status API, auth, policy, sticky land there |
 | 15 | Per-backend check config | Config file allows per-backend check type/target/interval (Phase 1 checks are global-only) |
 | 16 | Hot-reload via SIGHUP | Reload config without dropping active connections |
@@ -544,7 +544,7 @@ reload_service() {
 }
 ```
 
-- **Hotplug** (`/etc/hotplug.d/iface/99-gowan`): on `ifup`/`ifdown` of an interface referenced by any `wan` section, `/etc/init.d/gowan reload`. This handles DHCP renewals that change the WAN IP — the one remaining event that still restarts the daemon (health flaps no longer do). SIGHUP hot-reload in Phase 2 removes even that.
+- **Hotplug** (`/etc/hotplug.d/iface/99-gowan`): on `ifup`/`ifdown` of an interface referenced by any `wan` section, `/etc/init.d/gowan reload`, **debounced** — events arrive in bursts at boot (one per WAN), so a burst coalesces into a single reload 5 s after the first event. This handles DHCP renewals that change the WAN IP — the one remaining event that still restarts the daemon (health flaps no longer do). SIGHUP hot-reload in Phase 2 removes even that.
 
 ---
 

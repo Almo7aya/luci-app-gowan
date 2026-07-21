@@ -23,6 +23,18 @@ config_foreach _gowan_check_iface wan
 
 [ "$match" -eq 1 ] || exit 0
 
-logger -t gowan "interface $INTERFACE $ACTION, reloading"
-/etc/init.d/gowan reload
+# Debounce: interface events arrive in bursts (all WANs come up within
+# seconds of boot). Coalesce a burst into one reload 5s after the first
+# event; mkdir is the atomic "already pending?" check.
+mkdir -p /var/run/gowan
+if ! mkdir /var/run/gowan/reload.pending 2>/dev/null; then
+	exit 0
+fi
+
+logger -t gowan "interface $INTERFACE $ACTION, reload scheduled"
+(
+	sleep 5
+	rmdir /var/run/gowan/reload.pending 2>/dev/null
+	/etc/init.d/gowan reload
+) &
 exit 0

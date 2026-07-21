@@ -25,20 +25,23 @@ func dial_context_via_backend(lb *load_balancer, timeout time.Duration) func(con
 }
 
 /*
-Implements the server response of SOCKS5: dials the requested address
-through a healthy backend, falling back to the next backend when the
-outbound dial fails — one full pass over the backend list before giving
-up. A live dial failure also feeds the backend's health counters, so
-real outages converge faster than the check interval.
+Dials the requested address through a healthy backend, falling back to
+the next backend when the outbound dial fails — one full pass over the
+backend list before giving up. A live dial failure also feeds the
+backend's health counters, so real outages converge faster than the
+check interval. When socks is true the client is answered with SOCKS5
+reply codes; transparent connections get no protocol bytes.
 */
-func server_response(local_conn net.Conn, remote_address string) {
+func dispatch_connection(local_conn net.Conn, remote_address string, socks bool) {
 	tried := new(big.Int)
 
 	for {
 		lb, i := get_load_balancer(tried)
 		if lb == nil {
 			log.Println("[WARN]", remote_address, "all load balancers failed")
-			local_conn.Write([]byte{5, NETWORK_UNREACHABLE, 0, 1, 0, 0, 0, 0, 0, 0})
+			if socks {
+				local_conn.Write([]byte{5, NETWORK_UNREACHABLE, 0, 1, 0, 0, 0, 0, 0, 0})
+			}
 			local_conn.Close()
 			return
 		}
@@ -52,8 +55,17 @@ func server_response(local_conn net.Conn, remote_address string) {
 		}
 
 		log.Println("[DEBUG]", remote_address, "->", lb.address, "LB:", i)
-		local_conn.Write([]byte{5, SUCCESS, 0, 1, 0, 0, 0, 0, 0, 0})
+		if socks {
+			local_conn.Write([]byte{5, SUCCESS, 0, 1, 0, 0, 0, 0, 0, 0})
+		}
 		pipe_connections(local_conn, remote_conn)
 		return
 	}
+}
+
+/*
+Implements the server response of SOCKS5.
+*/
+func server_response(local_conn net.Conn, remote_address string) {
+	dispatch_connection(local_conn, remote_address, true)
 }

@@ -75,6 +75,30 @@ return view.extend({
 		o.depends('check_type', 'tcp');
 		o.depends('check_type', 'http');
 
+		s = m.section(form.NamedSection, 'main', 'gowan', _('Transparent Mode'),
+			_('Intercept ALL TCP traffic from the selected subnets and balance it across the WAN backends — no client configuration needed. Traffic to private/LAN destinations stays direct.'));
+
+		o = s.option(form.Flag, 'transparent', _('Enable transparent interception'));
+		o.default = '0';
+		o.rmempty = false;
+
+		o = s.option(form.Value, 'transparent_port', _('Internal redirect port'),
+			_('Clients never use this port directly'));
+		o.datatype = 'port';
+		o.default = '1081';
+		o.depends('transparent', '1');
+
+		o = s.option(form.DynamicList, 'transparent_subnet', _('Intercept subnets'),
+			_('Source subnets whose TCP traffic is intercepted, e.g. the LAN subnet'));
+		o.datatype = 'or(ip4addr("nomask"), cidr4)';
+		o.placeholder = '10.0.1.0/24';
+		o.depends('transparent', '1');
+
+		o = s.option(form.Flag, 'block_quic', _('Block QUIC (UDP 443)'),
+			_('Forces browsers to fall back from HTTP/3 to TCP so their traffic is actually balanced. Recommended while transparent mode is on.'));
+		o.default = '1';
+		o.depends('transparent', '1');
+
 		return m.render();
 	}
 });
