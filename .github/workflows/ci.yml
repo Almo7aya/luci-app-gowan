@@ -18,6 +18,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
+          cache-dependency-path: gowan/src/go.mod
 
       - name: gofmt
         run: |
@@ -59,6 +60,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
+          cache-dependency-path: gowan/src/go.mod
 
       - name: Run netns smoke test
         run: sudo --preserve-env=PATH scripts/netns-smoke.sh
