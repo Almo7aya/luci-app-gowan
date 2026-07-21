@@ -71,13 +71,37 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build with OpenWrt SDK
-        uses: openwrt/gh-action-sdk@main
-        env:
-          ARCH: x86_64-24.10.2
-          PACKAGES: gowan luci-app-gowan
-          NO_REFRESH_CHECK: true
-          V: s
+      # Same cache key as build.yml: CI runs and releases warm each
+      # other's SDK (incl. the Go host toolchain, the slowest part).
+      - name: Restore SDK cache
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdk
+          key: sdk-x86_64-24.10.2-v1
+
+      - name: Download SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/sdk
+          curl -sL "https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst" \
+            | tar --zstd -x --strip-components=1 -C ~/sdk
+
+      - name: Build packages
+        run: |
+          cd ~/sdk
+          echo "src-link local $GITHUB_WORKSPACE" > feeds.conf
+          cat feeds.conf.default >> feeds.conf
+          ./scripts/feeds update packages luci local
+          ./scripts/feeds install -p local gowan luci-app-gowan
+          ./scripts/feeds install golang luci-base
+          {
+            echo "CONFIG_PACKAGE_gowan=m"
+            echo "CONFIG_PACKAGE_luci-app-gowan=m"
+          } > .config
+          make defconfig
+          make package/gowan/compile package/luci-app-gowan/compile \
+            V=s -j"$(nproc)"
 
       - name: List built packages
-        run: find bin/ -name '*gowan*' -type f
+        run: find ~/sdk/bin/packages/ -name '*gowan*' -type f

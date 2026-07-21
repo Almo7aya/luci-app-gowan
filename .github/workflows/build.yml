@@ -45,7 +45,7 @@ jobs:
           {
             echo "![](https://img.shields.io/github/downloads/${GITHUB_REPOSITORY}/${{ steps.check_version.outputs.version }}/total?style=flat-square)"
             echo ""
-            echo "> Packages are built per architecture and attached as the matrix jobs complete."
+            echo "> x86_64 / OpenWrt 24.10 only for now — more architectures return later."
             echo ">"
             echo "> Install both \`gowan\` and \`luci-app-gowan\` for the web interface."
           } > release.txt
@@ -62,60 +62,71 @@ jobs:
           body_path: release.txt
 
   job_build:
-    name: Build [${{ matrix.platform }} ${{ matrix.sdk }}]
+    name: Build [${{ matrix.platform }}-${{ matrix.release }}]
     needs: job_check
     if: needs.job_check.outputs.has_update == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - x86_64
-          - aarch64_cortex-a53
-          - aarch64_cortex-a72
-          - aarch64_cortex-a76
-          - aarch64_generic
-          - arm_cortex-a5_vfpv4
-          - arm_cortex-a7
-          - arm_cortex-a7_neon-vfpv4
-          - arm_cortex-a7_vfpv4
-          - arm_cortex-a8_vfpv3
-          - arm_cortex-a9
-          - arm_cortex-a9_neon
-          - arm_cortex-a9_vfpv3-d16
-          - arm_cortex-a15_neon-vfpv4
-          - arm_arm1176jzf-s_vfp
-          - arm_arm926ej-s
-          - arm_fa526
-          - arm_xscale
-          - mips_24kc
-          - mips_4kec
-          - mips_mips32
-          - mipsel_24kc
-          - mipsel_24kc_24kf
-          - mipsel_74kc
-          - mipsel_mips32
-          - riscv64_riscv64
-        sdk:
-          - '24.10.2'
-          - 'snapshot'
+        # x86_64 only for now. To re-enable more targets, add entries with
+        # the matching SDK URL from downloads.openwrt.org (targets/<dir>/
+        # openwrt-sdk-<release>-<target>_gcc-*.Linux-x86_64.tar.zst).
+        # Previously built (24.10.2 ipk + snapshot apk): aarch64_cortex-a53,
+        # aarch64_cortex-a72, aarch64_cortex-a76, aarch64_generic,
+        # arm_cortex-a5_vfpv4, arm_cortex-a7[_neon-vfpv4,_vfpv4],
+        # arm_cortex-a8_vfpv3, arm_cortex-a9[_neon,_vfpv3-d16],
+        # arm_cortex-a15_neon-vfpv4, arm_arm1176jzf-s_vfp, arm_arm926ej-s,
+        # arm_fa526, arm_xscale, mips_24kc, mips_4kec, mips_mips32,
+        # mipsel_24kc[_24kf], mipsel_74kc, mipsel_mips32, riscv64_riscv64.
+        # NOTE: per-arch SDK caches are ~1 GB each — mind the 10 GB repo
+        # cache limit before re-enabling everything.
+        include:
+          - platform: x86_64
+            release: '24.10.2'
+            sdk_url: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build with OpenWrt SDK
-        uses: openwrt/gh-action-sdk@main
-        env:
-          ARCH: ${{ matrix.sdk == 'snapshot' && matrix.platform || format('{0}-{1}', matrix.platform, matrix.sdk) }}
-          PACKAGES: gowan luci-app-gowan
-          NO_REFRESH_CHECK: true
-          V: s
+      - name: Restore SDK cache
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/sdk
+          key: sdk-${{ matrix.platform }}-${{ matrix.release }}-v1
+
+      - name: Download SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/sdk
+          curl -sL "${{ matrix.sdk_url }}" | tar --zstd -x --strip-components=1 -C ~/sdk
+
+      - name: Build packages
+        run: |
+          cd ~/sdk
+          echo "src-link local $GITHUB_WORKSPACE" > feeds.conf
+          cat feeds.conf.default >> feeds.conf
+
+          # Only the feeds we actually need: packages (lang/golang),
+          # luci (luci.mk, luci-base) and our own repo.
+          ./scripts/feeds update packages luci local
+          ./scripts/feeds install -p local gowan luci-app-gowan
+          ./scripts/feeds install golang luci-base
+
+          {
+            echo "CONFIG_PACKAGE_gowan=m"
+            echo "CONFIG_PACKAGE_luci-app-gowan=m"
+          } > .config
+          make defconfig
+          make package/gowan/compile package/luci-app-gowan/compile \
+            V=s -j"$(nproc)"
 
       - name: Collect and rename artifacts
         id: collect
         run: |
           mkdir -p upload
-          find bin/packages/ -type f \
+          find ~/sdk/bin/packages/ -type f \
             \( -name 'gowan*.ipk' -o -name 'gowan*.apk' \
                -o -name 'luci-app-gowan*.ipk' -o -name 'luci-app-gowan*.apk' \) \
             -exec cp {} upload/ \;
