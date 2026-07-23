@@ -3,7 +3,7 @@
 		"description": "Grant access to GoWAN configuration and status",
 		"read": {
 			"ubus": {
-				"gowan": [ "status", "stats", "log", "speedtest" ]
+				"gowan": [ "status", "stats", "log", "speedtest_start", "speedtest_status" ]
 			},
 			"uci": [ "gowan" ]
 		},

@@ -2,41 +2,70 @@
 'require view';
 'require rpc';
 'require uci';
+'require poll';
 'require dom';
-'require ui';
 
-var callSpeedtest = rpc.declare({
+var callStart = rpc.declare({
 	object: 'gowan',
-	method: 'speedtest',
+	method: 'speedtest_start',
 	params: [ 'section' ]
 });
 
-function runTest(section, resultCell, btn) {
-	btn.disabled = true;
-	dom.content(resultCell, E('em', {}, _('Testing… (up to 20s)')));
+var callStatus = rpc.declare({
+	object: 'gowan',
+	method: 'speedtest_status',
+	expect: { results: {} }
+});
 
-	return callSpeedtest(section).then(function(res) {
-		btn.disabled = false;
-		if (!res || res.status !== 'ok') {
-			var why = (res && res.status) ? res.status.replace(/_/g, ' ') : _('failed');
-			dom.content(resultCell, E('span', { style: 'color:#dc2626' }, _('failed: %s').format(why)));
-			return;
-		}
-		dom.content(resultCell, E('span', {}, [
-			E('strong', {}, '%.2f Mbit/s'.format(res.mbps)),
-			res.latency_ms > 0 ? '  ·  %d ms'.format(res.latency_ms) : ''
+// Byte rate: B/s, KiB/s, MiB/s, GiB/s.
+function fmtRate(bytesPerSec) {
+	var n = bytesPerSec || 0, u = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'], i = 0;
+	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+	return (i === 0 ? String(Math.round(n)) : n.toFixed(2)) + ' ' + u[i];
+}
+
+function ago(ts) {
+	var t = parseInt(ts, 10) || 0;
+	if (t <= 0) return '';
+	var s = Math.max(0, Math.floor(Date.now() / 1000) - t);
+	if (s < 60) return _('%ds ago').format(s);
+	if (s < 3600) return _('%dm ago').format(Math.floor(s / 60));
+	return _('%dh ago').format(Math.floor(s / 3600));
+}
+
+// Renders one section's result cell from its server-side state.
+function renderState(cell, st) {
+	if (!st) { dom.content(cell, '–'); return; }
+
+	if (st.running) {
+		dom.content(cell, E('span', {}, [
+			E('span', { class: 'spinning' }),
+			' ', E('em', {}, _('Testing… (up to 20s)'))
 		]));
-	}).catch(function() {
-		btn.disabled = false;
-		dom.content(resultCell, E('span', { style: 'color:#dc2626' }, _('request error')));
-	});
+		return;
+	}
+	if (!st.status) { dom.content(cell, '–'); return; }
+	if (st.status !== 'ok') {
+		dom.content(cell, E('span', { style: 'color:#dc2626' },
+			_('failed: %s').format(String(st.status).replace(/_/g, ' '))));
+		return;
+	}
+	dom.content(cell, E('span', {}, [
+		E('strong', {}, fmtRate(st.bytes_per_sec)),
+		(st.latency_ms > 0 ? '  ·  %d ms'.format(st.latency_ms) : ''),
+		(st.ts ? E('span', { style: 'color:#9ca3af' }, '  (' + ago(st.ts) + ')') : '')
+	]));
 }
 
 return view.extend({
-	load: function() { return uci.load('gowan'); },
+	load: function() {
+		return Promise.all([ uci.load('gowan'), callStatus() ]);
+	},
 
-	render: function() {
+	render: function(data) {
 		var wans = uci.sections('gowan', 'wan');
+		var cells = {};   // section -> result <td>
+		var btns = {};    // section -> button
 
 		var table = E('table', { class: 'table' }, [
 			E('tr', { class: 'tr table-titles' }, [
@@ -53,32 +82,55 @@ return view.extend({
 			]));
 		}
 
-		var rows = [];
 		wans.forEach(function(w) {
 			var section = w['.name'];
-			var resultCell = E('td', { class: 'td' }, '–');
+			var cell = E('td', { class: 'td' }, '–');
 			var btn = E('button', { class: 'btn cbi-button cbi-button-action' }, _('Test'));
-			btn.addEventListener('click', function() { runTest(section, resultCell, btn); });
-			rows.push({ section: section, btn: btn });
+			btn.addEventListener('click', function() {
+				callStart(section).then(function() {
+					renderState(cell, { running: true });
+				});
+			});
+			cells[section] = cell;
+			btns[section] = btn;
 			table.appendChild(E('tr', { class: 'tr' }, [
 				E('td', { class: 'td' }, w.label || section),
 				E('td', { class: 'td' }, w.interface || '-'),
-				resultCell,
+				cell,
 				E('td', { class: 'td' }, btn)
 			]));
 		});
 
 		var testAll = E('button', { class: 'btn cbi-button cbi-button-action important' }, _('Test all'));
 		testAll.addEventListener('click', function() {
-			rows.reduce(function(chain, r) {
-				return chain.then(function() { return r.btn.click(); });
-			}, Promise.resolve());
+			wans.forEach(function(w) {
+				callStart(w['.name']).then(function() {
+					renderState(cells[w['.name']], { running: true });
+				});
+			});
 		});
+
+		var applyStates = function(results) {
+			results = results || {};
+			Object.keys(cells).forEach(function(section) {
+				var st = results[section];
+				renderState(cells[section], st);
+				if (btns[section]) btns[section].disabled = !!(st && st.running);
+			});
+		};
+
+		applyStates(data[1]);
+
+		// Server-side state → running tests survive reloads and tab
+		// changes; the page just reflects whatever the router reports.
+		poll.add(function() {
+			return callStatus().then(applyStates);
+		}, 2);
 
 		return E('div', {}, [
 			E('h2', {}, _('Per-WAN Speed Test')),
 			E('p', { class: 'cbi-value-description' },
-				_('Downloads a test file bound to each WAN interface and measures throughput and latency. Requires curl on the router.')),
+				_('Downloads a test file bound to each WAN interface and measures throughput (bytes/s) and latency. Tests run on the router and keep going even if you leave this page. Requires curl on the router.')),
 			wans.length ? E('p', {}, testAll) : '',
 			table
 		]);

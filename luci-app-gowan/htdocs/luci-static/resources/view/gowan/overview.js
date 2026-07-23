@@ -9,11 +9,29 @@ var callStats = rpc.declare({ object: 'gowan', method: 'stats' });
 
 var POLL = 5;              // seconds between samples
 var HISTORY = 60;         // samples kept per series (~5 min at 5s)
+var STORE_KEY = 'gowan.throughput.v1';
 var PALETTE = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#4f46e5'];
 
-// Per-device rolling state, persisted across polls within the page.
+// Per-device rolling state (bytes/sec), restored from localStorage so the
+// graph survives a page reload.
 var prevSample = {};      // device -> { rx, tx, t }
-var rateHistory = {};     // device -> [{ down, up }]  (bits/sec)
+var rateHistory = {};     // device -> [{ down, up }]  (bytes/sec)
+
+(function restoreHistory() {
+	try {
+		var raw = localStorage.getItem(STORE_KEY);
+		if (!raw) return;
+		var saved = JSON.parse(raw);
+		if (saved && saved.rateHistory) rateHistory = saved.rateHistory;
+		if (saved && saved.prevSample) prevSample = saved.prevSample;
+	} catch (e) { /* private mode / quota / corrupt: start fresh */ }
+})();
+
+function persistHistory() {
+	try {
+		localStorage.setItem(STORE_KEY, JSON.stringify({ prevSample: prevSample, rateHistory: rateHistory }));
+	} catch (e) { /* ignore */ }
+}
 
 function fmtBytes(bytes) {
 	var n = parseInt(bytes, 10) || 0, u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'], i = 0;
@@ -21,9 +39,10 @@ function fmtBytes(bytes) {
 	return (i === 0 ? String(n) : n.toFixed(1)) + ' ' + u[i];
 }
 
-function fmtRate(bits) {
-	var n = bits || 0, u = ['bit/s', 'kbit/s', 'Mbit/s', 'Gbit/s'], i = 0;
-	while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+// Byte rate: B/s, KiB/s, MiB/s, GiB/s (binary units, bytes not bits).
+function fmtRate(bytesPerSec) {
+	var n = bytesPerSec || 0, u = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'], i = 0;
+	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
 	return (i === 0 ? String(Math.round(n)) : n.toFixed(2)) + ' ' + u[i];
 }
 
@@ -57,11 +76,14 @@ function ingestStats(stats) {
 		if (!dev) return;
 		var prev = prevSample[dev];
 		var cur = { rx: parseInt(w.rx_bytes, 10) || 0, tx: parseInt(w.tx_bytes, 10) || 0, t: now };
-		if (prev && now > prev.t) {
-			var dt = now - prev.t;
+		var dt = prev ? now - prev.t : 0;
+		// Only record when the gap looks like a normal poll interval; a
+		// large gap (page was closed, restored from storage) would average
+		// out to a misleading bar, so reseed instead of pushing it.
+		if (prev && dt > 0 && dt < POLL * 4) {
 			// Counters can reset (reboot/renew); clamp negatives to 0.
-			var down = Math.max(0, cur.rx - prev.rx) * 8 / dt;
-			var up = Math.max(0, cur.tx - prev.tx) * 8 / dt;
+			var down = Math.max(0, cur.rx - prev.rx) / dt;   // bytes/sec
+			var up = Math.max(0, cur.tx - prev.tx) / dt;
 			rates[dev] = { down: down, up: up };
 			var h = rateHistory[dev] || (rateHistory[dev] = []);
 			h.push({ down: down, up: up });
@@ -69,6 +91,7 @@ function ingestStats(stats) {
 		}
 		prevSample[dev] = cur;
 	});
+	persistHistory();
 	return rates;
 }
 

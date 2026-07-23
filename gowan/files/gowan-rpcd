@@ -151,25 +151,62 @@ do_log() {
 	json_dump
 }
 
-do_speedtest() {
-	local input section
+SPEEDTEST_DIR=/var/run/gowan/speedtest
+
+# Launches a detached test for one section (unless one is already running)
+# so it survives the client navigating away or reloading.
+do_speedtest_start() {
+	local input section found=0
 
 	read -r input
 	section=$(jsonfilter -s "$input" -e '@.section' 2>/dev/null)
-	# Validate against real wan section names before touching a shell.
 	config_load gowan
-	local found=0
 	_gowan_match_section() { [ "$1" = "$section" ] && found=1; }
 	config_foreach _gowan_match_section wan
-	if [ "$found" -ne 1 ]; then
-		json_init
-		json_add_string wan "$section"
-		json_add_string status "invalid_section"
-		json_dump
-		return
-	fi
 
-	/usr/lib/gowan/speedtest.sh "$section"
+	json_init
+	json_add_string section "$section"
+	if [ "$found" -ne 1 ]; then
+		json_add_string status "invalid_section"
+	elif [ -d "$SPEEDTEST_DIR/$section.lock" ]; then
+		json_add_boolean running 1
+	else
+		setsid /usr/lib/gowan/speedtest.sh "$section" </dev/null >/dev/null 2>&1 &
+		json_add_boolean started 1
+	fi
+	json_dump
+}
+
+_gowan_add_speedtest_state() {
+	local section="$1" res="$SPEEDTEST_DIR/$1.json"
+	local status bps lat ts
+
+	json_add_object "$section"
+	if [ -d "$SPEEDTEST_DIR/$section.lock" ]; then
+		json_add_boolean running 1
+	else
+		json_add_boolean running 0
+	fi
+	if [ -f "$res" ]; then
+		status=$(jsonfilter -i "$res" -e '@.status' 2>/dev/null)
+		bps=$(jsonfilter -i "$res" -e '@.bytes_per_sec' 2>/dev/null)
+		lat=$(jsonfilter -i "$res" -e '@.latency_ms' 2>/dev/null)
+		ts=$(jsonfilter -i "$res" -e '@.ts' 2>/dev/null)
+		json_add_string status "${status:-}"
+		json_add_double bytes_per_sec "${bps:-0}"
+		json_add_int latency_ms "${lat:-0}"
+		json_add_int ts "${ts:-0}"
+	fi
+	json_close_object
+}
+
+do_speedtest_status() {
+	config_load gowan
+	json_init
+	json_add_object results
+	config_foreach _gowan_add_speedtest_state wan
+	json_close_object
+	json_dump
 }
 
 case "$1" in
@@ -182,8 +219,10 @@ case "$1" in
 		json_add_object log
 		json_add_int lines 100
 		json_close_object
-		json_add_object speedtest
+		json_add_object speedtest_start
 		json_add_string section ""
+		json_close_object
+		json_add_object speedtest_status
 		json_close_object
 		json_dump
 		;;
@@ -192,7 +231,8 @@ case "$1" in
 			status) do_status ;;
 			stats) do_stats ;;
 			log) do_log ;;
-			speedtest) do_speedtest ;;
+			speedtest_start) do_speedtest_start ;;
+			speedtest_status) do_speedtest_status ;;
 			*) exit 1 ;;
 		esac
 		;;
