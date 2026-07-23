@@ -116,6 +116,7 @@ gowan_apply_nft() {
 	chain udp_tproxy {
 		type filter hook prerouting priority mangle; policy accept;
 		ip daddr { $GOWAN_NO_INTERCEPT } return
+		udp dport 33434-33534 return
 		ip saddr { $subnets } meta l4proto udp tproxy ip to :$udp_port meta mark set $GOWAN_TPROXY_MARK
 	}"
 			elif [ "$block_quic" = "1" ]; then

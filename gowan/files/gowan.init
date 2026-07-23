@@ -55,6 +55,15 @@ start_service() {
 
 	mkdir -p "$GOWAN_RUN_DIR"
 
+	# GoWAN is the LAN gateway but forwards unintercepted traffic (ICMP)
+	# via another same-subnet gateway, which makes the kernel emit noisy
+	# ICMP redirects to clients. send_redirects is OR'd across all + each
+	# interface, so clear every one (and default, for interfaces that
+	# appear later).
+	for _r in /proc/sys/net/ipv4/conf/*/send_redirects; do
+		echo 0 > "$_r" 2>/dev/null
+	done
+
 	if ! gowan_render_backends; then
 		logger -t gowan -p daemon.err "no usable WAN backends; not starting"
 		return 1
