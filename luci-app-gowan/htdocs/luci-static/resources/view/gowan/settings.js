@@ -1,6 +1,74 @@
 'use strict';
 'require view';
 'require form';
+'require rpc';
+'require dom';
+
+var callVersion = rpc.declare({ object: 'gowan', method: 'version' });
+var callUpdateCheck = rpc.declare({ object: 'gowan', method: 'update_check' });
+var callUpdateApply = rpc.declare({ object: 'gowan', method: 'update_apply' });
+
+function mkBtn(label, cls, cb) {
+	var b = E('button', { class: 'btn cbi-button ' + cls }, label);
+	b.addEventListener('click', cb);
+	return b;
+}
+
+// Self-contained "Updates" panel: version, check, and one-click update.
+function updatePanel() {
+	var line = E('div', { style: 'margin-bottom:6px' }, _('Loading version…'));
+	var actions = E('div', {});
+
+	function applyUpdate() {
+		dom.content(actions, E('em', {}, _('Downloading and installing… this page will reload in ~30s.')));
+		callUpdateApply().then(function(res) {
+			if (res && res.started)
+				window.setTimeout(function() { location.reload(); }, 30000);
+			else
+				dom.content(actions, E('span', { style: 'color:#dc2626' },
+					_('Update failed: %s').format((res && res.status) || 'error')));
+		}).catch(function() {
+			dom.content(actions, E('span', { style: 'color:#dc2626' }, _('Update request error')));
+		});
+	}
+
+	function doCheck() {
+		dom.content(actions, E('em', {}, _('Checking…')));
+		callUpdateCheck().then(function(r) {
+			if (!r || r.error) {
+				dom.content(actions, [
+					E('span', { style: 'color:#dc2626' }, _('Check failed (no internet?)')), ' ',
+					mkBtn(_('Retry'), 'cbi-button-action', doCheck)
+				]);
+				return;
+			}
+			if (r.update_available) {
+				dom.content(actions, [
+					E('span', { style: 'color:#2563eb;font-weight:bold' },
+						_('Update available: %s → %s').format(r.current, r.latest)), ' ',
+					mkBtn(_('Update now'), 'cbi-button-negative', applyUpdate), ' ',
+					E('a', { href: r.url, target: '_blank', rel: 'noreferrer' }, _('release notes'))
+				]);
+			} else {
+				dom.content(actions, [
+					E('span', { style: 'color:#16a34a' }, _('Up to date (%s)').format(r.current || r.latest || '')), ' ',
+					mkBtn(_('Check again'), 'cbi-button-action', doCheck)
+				]);
+			}
+		});
+	}
+
+	callVersion().then(function(v) {
+		line.textContent = _('Installed — gowan: %s, luci-app-gowan: %s').format(
+			(v && v.gowan) || '?', (v && v.luci) || '?');
+	});
+	dom.content(actions, mkBtn(_('Check for updates'), 'cbi-button-action', doCheck));
+
+	return E('div', { class: 'cbi-section' }, [
+		E('h3', {}, _('Updates')),
+		line, actions
+	]);
+}
 
 return view.extend({
 	render: function() {
@@ -197,6 +265,8 @@ return view.extend({
 		o.default = '1';
 		o.depends('enabled', '1');
 
-		return m.render();
+		return m.render().then(function(formNode) {
+			return E('div', {}, [ updatePanel(), formNode ]);
+		});
 	}
 });

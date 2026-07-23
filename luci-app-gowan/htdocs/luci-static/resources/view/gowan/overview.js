@@ -7,6 +7,8 @@
 
 var callStatus = rpc.declare({ object: 'gowan', method: 'status' });
 var callStats = rpc.declare({ object: 'gowan', method: 'stats' });
+var callUpdateCheck = rpc.declare({ object: 'gowan', method: 'update_check' });
+var callUpdateApply = rpc.declare({ object: 'gowan', method: 'update_apply' });
 
 var HISTORY = 60;         // samples kept per series
 var STORE_KEY = 'gowan.throughput.v1';
@@ -226,6 +228,34 @@ function sumConns(status, field) {
 	return ((status && status.wans) || []).reduce(function(a, w) { return a + (w[field] || 0); }, 0);
 }
 
+// One-shot update check on page load; renders a banner into `slot` when a
+// newer release is available, with a one-click update button.
+function checkForUpdate(slot) {
+	callUpdateCheck().then(function(r) {
+		if (!r || r.error || !r.update_available)
+			return;
+
+		var btn = E('button', { class: 'btn cbi-button cbi-button-negative' }, _('Update now'));
+		btn.addEventListener('click', function() {
+			btn.disabled = true;
+			dom.content(slot.lastChild, E('em', {}, _('Installing… this page will reload shortly.')));
+			callUpdateApply().then(function(res) {
+				if (res && res.started)
+					window.setTimeout(function() { location.reload(); }, 30000);
+			});
+		});
+
+		dom.content(slot, E('div', {
+			class: 'alert-message warning',
+			style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap'
+		}, [
+			E('span', {}, _('GoWAN %s is available (you have %s).').format(r.latest, r.current)),
+			btn,
+			E('a', { href: r.url, target: '_blank', rel: 'noreferrer' }, _('release notes'))
+		]));
+	}).catch(function() { /* offline: no banner */ });
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([ uci.load('gowan'), callStatus(), callStats() ]);
@@ -237,6 +267,7 @@ return view.extend({
 
 		var container = E('div', {}, [
 			E('h2', {}, _('GoWAN')),
+			E('div', { id: 'gowan-update-banner' }),
 			E('div', { id: 'gowan-proxy-state' }),
 			E('h3', {}, _('Live Throughput')),
 			E('div', { id: 'gowan-chart' }),
@@ -264,6 +295,7 @@ return view.extend({
 		};
 
 		update(data[1], data[2]);
+		checkForUpdate(container.querySelector('#gowan-update-banner'));
 		poll.add(function() {
 			return Promise.all([callStatus(), callStats()]).then(function(res) { update(res[0], res[1]); });
 		}, pollInterval);

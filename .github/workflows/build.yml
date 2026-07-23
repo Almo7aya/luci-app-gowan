@@ -85,6 +85,9 @@ jobs:
           - platform: x86_64
             release: '24.10.2'
             sdk_url: https://downloads.openwrt.org/releases/24.10.2/targets/x86/64/openwrt-sdk-24.10.2-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - platform: aarch64_cortex-a72
+            release: '24.10.2'
+            sdk_url: https://downloads.openwrt.org/releases/24.10.2/targets/mvebu/cortexa72/openwrt-sdk-24.10.2-mvebu-cortexa72_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - uses: actions/checkout@v6

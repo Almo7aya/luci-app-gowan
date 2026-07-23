@@ -988,6 +988,12 @@ jobs:
         with: { tag_name: "${{ needs.job_check.outputs.version }}", files: upload/* }
 ```
 
+### Shipped extras (v0.9.0)
+
+- **In-app updates**: rpcd `version` / `update_check` / `update_apply` query the project's own GitHub `/releases` (the list, since `/releases/latest` skips pre-releases), compare versions, and self-install the arch-matched ipks (detached via setsid so the install survives the rpcd restart). LuCI shows an update banner on the Overview and an Updates panel in Settings.
+- **Main dashboard widget**: `view/status/include/40-gowan.js` adds a GoWAN summary card to LuCI's Status → Overview.
+- Release matrix: x86_64 **+ aarch64_cortex-a72**.
+
 ### Target Architectures (from bandix pattern)
 
 **24.10.x (ipk) and snapshots (apk), same list:** x86_64, aarch64_cortex-a53, aarch64_cortex-a72, aarch64_cortex-a76, aarch64_generic, arm_cortex-a5_vfpv4, arm_cortex-a7, arm_cortex-a7_neon-vfpv4, arm_cortex-a7_vfpv4, arm_cortex-a8_vfpv3, arm_cortex-a9, arm_cortex-a9_neon, arm_cortex-a9_vfpv3-d16, arm_cortex-a15_neon-vfpv4, arm_arm1176jzf-s_vfp, arm_arm926ej-s, arm_fa526, arm_xscale, mips_24kc, mips_4kec, mips_mips32, mipsel_24kc, mipsel_24kc_24kf, mipsel_74kc, mipsel_mips32, riscv64_riscv64

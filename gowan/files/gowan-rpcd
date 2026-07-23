@@ -6,6 +6,133 @@
 . /usr/share/libubox/jshn.sh
 . /usr/lib/gowan/functions.sh
 
+# In-app updates pull ONLY from the project's own GitHub repo (hardcoded,
+# so a caller can never redirect the download elsewhere).
+GOWAN_REPO=Almo7aya/luci-app-gowan
+
+_fetch() { # url -> stdout
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL -m 25 -H "User-Agent: gowan-updater" "$1"
+	else
+		uclient-fetch -q -T 25 -O - "$1"
+	fi
+}
+
+_fetch_to() { # url outfile
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL -m 180 -o "$2" "$1"
+	else
+		uclient-fetch -q -T 180 -O "$2" "$1"
+	fi
+}
+
+_installed_version() { # package -> version string
+	opkg list-installed "$1" 2>/dev/null | awk '{print $3; exit}'
+}
+
+# Returns 0 if version $1 is strictly newer than $2 (handles vX, a.b.c, -rN).
+_ver_gt() {
+	[ "$(awk -v a="$1" -v b="$2" 'BEGIN{
+		gsub(/^v/,"",a); gsub(/^v/,"",b); gsub(/-r/,".",a); gsub(/-r/,".",b);
+		na=split(a,A,"."); nb=split(b,B,"."); n=(na>nb)?na:nb;
+		for(i=1;i<=n;i++){x=(i<=na)?A[i]+0:0; y=(i<=nb)?B[i]+0:0;
+			if(x>y){print 1; exit} if(x<y){print 0; exit}}
+		print 0}')" = "1" ]
+}
+
+# Latest published release (incl. pre-releases, which /releases/latest
+# excludes) is the first element of the /releases list.
+GOWAN_RELEASES_URL="https://api.github.com/repos/$GOWAN_REPO/releases?per_page=5"
+
+# Parses release JSON + arch; sets GOWAN_GURL / GOWAN_LURL to the asset
+# download URLs for this router's architecture (empty if not found).
+_gowan_find_assets() { # json arch
+	local json="$1" arch="$2" n=0 name url
+	GOWAN_GURL=""
+	GOWAN_LURL=""
+	while [ "$n" -lt 100 ]; do
+		name=$(jsonfilter -s "$json" -e "@[0].assets[$n].name" 2>/dev/null)
+		[ -z "$name" ] && break
+		url=$(jsonfilter -s "$json" -e "@[0].assets[$n].browser_download_url" 2>/dev/null)
+		case "$name" in
+			gowan_*_"$arch".ipk) GOWAN_GURL="$url" ;;
+			luci-app-gowan_*_"$arch".ipk) GOWAN_LURL="$url" ;;
+		esac
+		n=$((n + 1))
+	done
+}
+
+do_version() {
+	json_init
+	json_add_string gowan "$(_installed_version gowan)"
+	json_add_string luci "$(_installed_version luci-app-gowan)"
+	json_dump
+}
+
+do_update_check() {
+	local json tag current arch avail=0
+	json=$(_fetch "$GOWAN_RELEASES_URL")
+
+	json_init
+	if [ -z "$json" ]; then
+		json_add_string error "fetch_failed"
+		json_dump
+		return
+	fi
+
+	tag=$(jsonfilter -s "$json" -e "@[0].tag_name" 2>/dev/null)
+	current=$(_installed_version gowan)
+	# shellcheck disable=SC1091
+	. /etc/openwrt_release 2>/dev/null
+	arch="$DISTRIB_ARCH"
+	_gowan_find_assets "$json" "$arch"
+
+	[ -n "$tag" ] && _ver_gt "$tag" "$current" && [ -n "$GOWAN_GURL" ] && avail=1
+
+	json_add_string current "$current"
+	json_add_string latest "$tag"
+	json_add_boolean update_available "$avail"
+	json_add_string arch "$arch"
+	json_add_string notes "$(jsonfilter -s "$json" -e "@[0].body" 2>/dev/null)"
+	json_add_string url "https://github.com/$GOWAN_REPO/releases"
+	json_dump
+}
+
+do_update_apply() {
+	local json arch tmp=/tmp/gowan-update
+	json=$(_fetch "$GOWAN_RELEASES_URL")
+	# shellcheck disable=SC1091
+	. /etc/openwrt_release 2>/dev/null
+	arch="$DISTRIB_ARCH"
+	_gowan_find_assets "$json" "$arch"
+
+	json_init
+	if [ -z "$GOWAN_GURL" ] || [ -z "$GOWAN_LURL" ]; then
+		json_add_string status "no_package_for_arch"
+		json_dump
+		return
+	fi
+
+	mkdir -p "$tmp"
+	if ! _fetch_to "$GOWAN_GURL" "$tmp/gowan.ipk" || ! _fetch_to "$GOWAN_LURL" "$tmp/luci.ipk"; then
+		json_add_string status "download_failed"
+		json_dump
+		return
+	fi
+	if [ ! -s "$tmp/gowan.ipk" ] || [ ! -s "$tmp/luci.ipk" ]; then
+		json_add_string status "download_empty"
+		json_dump
+		return
+	fi
+
+	# Detach from rpcd so the install survives the rpcd restart it triggers.
+	setsid sh -c "sleep 1; \
+		opkg install --force-reinstall '$tmp/gowan.ipk' '$tmp/luci.ipk' >/tmp/gowan-update.log 2>&1; \
+		/etc/init.d/gowan restart; /etc/init.d/rpcd restart" </dev/null >/dev/null 2>&1 &
+
+	json_add_boolean started 1
+	json_dump
+}
 # Reads one health.json field for a backend IP. IP comes from netifd, but
 # validate anyway before splicing into the jsonfilter expression.
 _health_field() {
@@ -272,6 +399,12 @@ case "$1" in
 		json_close_object
 		json_add_object usage
 		json_close_object
+		json_add_object version
+		json_close_object
+		json_add_object update_check
+		json_close_object
+		json_add_object update_apply
+		json_close_object
 		json_dump
 		;;
 	call)
@@ -282,6 +415,9 @@ case "$1" in
 			speedtest_start) do_speedtest_start ;;
 			speedtest_status) do_speedtest_status ;;
 			usage) do_usage ;;
+			version) do_version ;;
+			update_check) do_update_check ;;
+			update_apply) do_update_apply ;;
 			*) exit 1 ;;
 		esac
 		;;
