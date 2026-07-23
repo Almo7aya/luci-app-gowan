@@ -170,7 +170,7 @@
 | 15 | Per-backend check config ✅ *shipped in v0.3.0* | Backends file (`/var/run/gowan/backends.json`, rendered from UCI) carries optional per-WAN check overrides; absent fields inherit global flags |
 | 16 | Hot-reload via SIGHUP ✅ *shipped in v0.3.0* | Daemon re-reads the backends file on SIGHUP and swaps the set without dropping connections; surviving backends keep health + counters. Init reloads via signal unless a listener-affecting option changed; hotplug WAN-IP changes are now seamless |
 | 17 | JSON status API ✅ *shipped in v0.3.0* | `-api 127.0.0.1:9080` → `GET /status`: uptime, per-backend health and connection counters; localhost-only |
-| 18 | Policy routing (client-IP) ✅ *shipped in v0.4.0* | client-IP / CIDR → WAN, evaluated in-process; down-backend falls back to healthy. domain/port/dest-IP still planned |
+| 18 | Policy routing (all types) ✅ *client-IP v0.4.0, port/dest-IP/domain v0.6.0* | client-IP / dest-IP / port / domain → WAN, first-match-wins, comma-separated lists + port ranges; down-backend falls back. domain matches SOCKS hostnames only (transparent carries IP); SNI sniffing for transparent-mode domains is a future item |
 | 19 | Sticky sessions ✅ *shipped in v0.4.0* | In-memory client-IP → WAN map with TTL, refreshed on use, skips down backends |
 | 20 | SOCKS5 authentication ✅ *shipped in v0.4.0* | RFC 1929 username/password (SOCKS5 listener only; transparent mode is ACL-guarded); constant-time compare |
 | 21 | Failover notifications ✅ *shipped in v0.4.0* | `notify.sh` on the daemon's `-on-change` hook fires Telegram/Discord/webhook on WAN state change |

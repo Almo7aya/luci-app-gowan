@@ -12,7 +12,7 @@ return view.extend({
 		var m, s, o;
 
 		m = new form.Map('gowan', _('Policy Rules'),
-			_('Pin a client IP (or CIDR) to a specific WAN backend. Rules are evaluated in order; the first match wins, everything else is load-balanced normally. If a pinned backend is down, its traffic falls back to a healthy one. Domain/port/destination rule types are planned for a later release.'));
+			_('Pin traffic to a specific WAN backend by client IP, destination IP, destination port, or domain. Rules are evaluated top-to-bottom; the first match wins, everything else is load-balanced normally. If a pinned backend is down, its traffic falls back to a healthy one.'));
 
 		s = m.section(form.GridSection, 'policy');
 		s.addremove = true;
@@ -26,15 +26,17 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.Value, 'name', _('Name'));
-		o.placeholder = _('e.g. My laptop via WAN 1');
+		o.placeholder = _('e.g. Torrents via WAN 2');
 
 		o = s.option(form.ListValue, 'type', _('Type'));
 		o.value('client_ip', _('Client IP'));
+		o.value('dest_ip', _('Destination IP'));
+		o.value('port', _('Destination port'));
+		o.value('domain', _('Domain'));
 		o.default = 'client_ip';
 
 		o = s.option(form.Value, 'match', _('Match'),
-			_('Client IPv4 address or CIDR subnet'));
-		o.datatype = 'or(ip4addr("nomask"), cidr4)';
+			_('Comma-separated list. Client/Dest IP: address or CIDR (e.g. 10.0.1.5, 192.168.0.0/16). Port: single, list, or range (e.g. 443,6881:6889). Domain: hostnames or wildcards (e.g. *.youtube.com) — matches SOCKS5 clients that send a hostname; transparent traffic carries only an IP.'));
 		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'wan', _('Target WAN'));

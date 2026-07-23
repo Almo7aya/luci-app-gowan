@@ -37,7 +37,7 @@ func dispatch_connection(local_conn net.Conn, remote_address string, socks bool)
 	client_ip := client_ip_of(local_conn)
 
 	for {
-		lb, i := pick_backend(client_ip, tried)
+		lb, i := pick_backend(client_ip, remote_address, tried)
 		if lb == nil {
 			log.Println("[WARN]", remote_address, "all load balancers failed")
 			if socks {

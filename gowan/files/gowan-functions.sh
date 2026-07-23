@@ -224,8 +224,10 @@ _gowan_render_policy() {
 	config_get ptype "$section" type ""
 	config_get match "$section" match ""
 	config_get wan "$section" wan ""
-	# Only client_ip is enforced by the daemon today.
-	[ "$ptype" = "client_ip" ] || return 0
+	case "$ptype" in
+		client_ip|dest_ip|port|domain) ;;
+		*) return 0 ;;
+	esac
 	[ -n "$match" ] && [ -n "$wan" ] || return 0
 
 	json_add_object ""

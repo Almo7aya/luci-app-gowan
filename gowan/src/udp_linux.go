@@ -147,7 +147,7 @@ func flow_egress(f *udp_flow) *net.UDPConn {
 func create_udp_flow(client, dst *syscall.SockaddrInet4) *udp_flow {
 	clientIP := sa_ip(client)
 
-	lb, _ := pick_backend(clientIP, new(big.Int))
+	lb, _ := pick_backend(clientIP, sa_string(dst), new(big.Int))
 	if lb == nil {
 		return nil
 	}
