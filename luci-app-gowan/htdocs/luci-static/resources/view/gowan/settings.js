@@ -30,9 +30,14 @@ return view.extend({
 		o.value('allow', _('Allow'));
 		o.default = 'deny';
 
-		o = s.option(form.Flag, 'log_connections', _('Log connections'),
-			_('One syslog line per dispatched connection'));
-		o.default = '1';
+		o = s.option(form.Value, 'stats_interval', _('Dashboard refresh interval (s)'),
+			_('How often the Overview page polls for live stats'));
+		o.datatype = 'range(1,60)';
+		o.default = '3';
+
+		o = s.option(form.Flag, 'debug', _('Debug logging'),
+			_('Log every dispatched connection and UDP flow to the system log. Verbose — leave off in production; enable only when troubleshooting.'));
+		o.default = '0';
 
 		s = m.section(form.NamedSection, 'main', 'gowan', _('Health Checks'));
 

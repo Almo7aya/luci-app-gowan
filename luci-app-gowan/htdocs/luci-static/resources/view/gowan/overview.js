@@ -1,16 +1,18 @@
 'use strict';
 'require view';
 'require rpc';
+'require uci';
 'require poll';
 'require dom';
 
 var callStatus = rpc.declare({ object: 'gowan', method: 'status' });
 var callStats = rpc.declare({ object: 'gowan', method: 'stats' });
 
-var POLL = 5;              // seconds between samples
-var HISTORY = 60;         // samples kept per series (~5 min at 5s)
+var HISTORY = 60;         // samples kept per series
 var STORE_KEY = 'gowan.throughput.v1';
 var PALETTE = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#4f46e5'];
+
+var pollInterval = 3;     // seconds; overridden from UCI at render
 
 // Per-device rolling state (bytes/sec), restored from localStorage so the
 // graph survives a page reload.
@@ -19,9 +21,7 @@ var rateHistory = {};     // device -> [{ down, up }]  (bytes/sec)
 
 (function restoreHistory() {
 	try {
-		var raw = localStorage.getItem(STORE_KEY);
-		if (!raw) return;
-		var saved = JSON.parse(raw);
+		var saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
 		if (saved && saved.rateHistory) rateHistory = saved.rateHistory;
 		if (saved && saved.prevSample) prevSample = saved.prevSample;
 	} catch (e) { /* private mode / quota / corrupt: start fresh */ }
@@ -33,17 +33,19 @@ function persistHistory() {
 	} catch (e) { /* ignore */ }
 }
 
-function fmtBytes(bytes) {
-	var n = parseInt(bytes, 10) || 0, u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'], i = 0;
-	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-	return (i === 0 ? String(n) : n.toFixed(1)) + ' ' + u[i];
-}
-
-// Byte rate: B/s, KiB/s, MiB/s, GiB/s (binary units, bytes not bits).
+// Byte rate, full precision: B/s, KiB/s, MiB/s, GiB/s.
 function fmtRate(bytesPerSec) {
 	var n = bytesPerSec || 0, u = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'], i = 0;
 	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
 	return (i === 0 ? String(Math.round(n)) : n.toFixed(2)) + ' ' + u[i];
+}
+
+// Compact byte rate for axis labels (kept short so they never clip).
+function fmtRateAxis(bytesPerSec) {
+	var n = bytesPerSec || 0, u = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'], i = 0;
+	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+	var v = (i === 0 || n >= 100) ? Math.round(n) : n.toFixed(1);
+	return v + ' ' + u[i];
 }
 
 function fmtSince(ts) {
@@ -77,10 +79,10 @@ function ingestStats(stats) {
 		var prev = prevSample[dev];
 		var cur = { rx: parseInt(w.rx_bytes, 10) || 0, tx: parseInt(w.tx_bytes, 10) || 0, t: now };
 		var dt = prev ? now - prev.t : 0;
-		// Only record when the gap looks like a normal poll interval; a
-		// large gap (page was closed, restored from storage) would average
-		// out to a misleading bar, so reseed instead of pushing it.
-		if (prev && dt > 0 && dt < POLL * 4) {
+		// Only record when the gap looks like a normal poll interval; a large
+		// gap (page was closed, restored from storage) would average out to a
+		// misleading bar, so reseed instead of pushing it.
+		if (prev && dt > 0 && dt < pollInterval * 4) {
 			// Counters can reset (reboot/renew); clamp negatives to 0.
 			var down = Math.max(0, cur.rx - prev.rx) / dt;   // bytes/sec
 			var up = Math.max(0, cur.tx - prev.tx) / dt;
@@ -95,54 +97,53 @@ function ingestStats(stats) {
 	return rates;
 }
 
-// Multi-series SVG line chart (no external libraries; CSP-safe).
-function lineChart(series, opts) {
-	opts = opts || {};
-	var W = opts.width || 760, H = opts.height || 180, pad = 28;
+// Multi-series SVG line chart (no external libraries; CSP-safe). Scales
+// uniformly with container width so axis labels stay crisp and unclipped.
+function lineChart(series) {
+	var W = 760, H = 200, padL = 70, padR = 12, padT = 12, padB = 16;
+	var plotW = W - padL - padR, plotH = H - padT - padB;
 	var max = 1;
 	series.forEach(function(s) { s.points.forEach(function(v) { if (v > max) max = v; }); });
 
 	var ns = 'http://www.w3.org/2000/svg';
 	var svg = document.createElementNS(ns, 'svg');
 	svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-	svg.setAttribute('width', '100%');
-	svg.setAttribute('preserveAspectRatio', 'none');
-	svg.style.maxWidth = '100%';
+	svg.style.width = '100%';
+	svg.style.height = 'auto';
 
-	function mkline(x1, y1, x2, y2, stroke, dash) {
+	function mkline(x1, y1, x2, y2, dash) {
 		var l = document.createElementNS(ns, 'line');
 		l.setAttribute('x1', x1); l.setAttribute('y1', y1);
 		l.setAttribute('x2', x2); l.setAttribute('y2', y2);
-		l.setAttribute('stroke', stroke); l.setAttribute('stroke-width', '1');
+		l.setAttribute('stroke', '#9ca3af'); l.setAttribute('stroke-width', '1');
+		l.setAttribute('opacity', '0.5');
 		if (dash) l.setAttribute('stroke-dasharray', dash);
 		return l;
 	}
-	function mktext(x, y, str, anchor) {
+	function mktext(x, y, str) {
 		var t = document.createElementNS(ns, 'text');
 		t.setAttribute('x', x); t.setAttribute('y', y);
 		t.setAttribute('font-size', '10'); t.setAttribute('fill', '#9ca3af');
-		if (anchor) t.setAttribute('text-anchor', anchor);
+		t.setAttribute('text-anchor', 'end');
 		t.textContent = str;
 		return t;
 	}
 
-	// gridlines + scale labels (0, mid, max)
+	// Gridlines + y-axis scale labels (0, mid, max).
 	[0, 0.5, 1].forEach(function(f) {
-		var y = pad + (H - 2 * pad) * (1 - f);
-		svg.appendChild(mkline(pad, y, W - 4, y, '#9ca3af', '2 3'));
-		svg.appendChild(mktext(pad - 4, y + 3, fmtRate(max * f), 'end'));
+		var y = padT + plotH * (1 - f);
+		svg.appendChild(mkline(padL, y, W - padR, y, '2 3'));
+		svg.appendChild(mktext(padL - 8, y + 3, fmtRateAxis(max * f)));
 	});
 
-	var plotW = W - pad - 4, plotH = H - 2 * pad;
 	series.forEach(function(s) {
 		if (s.points.length < 2) return;
 		var step = plotW / (HISTORY - 1);
+		var offset = HISTORY - s.points.length;   // right-align newest sample
 		var d = '';
-		// Right-align newest sample; older samples extend left.
-		var offset = HISTORY - s.points.length;
 		s.points.forEach(function(v, i) {
-			var x = pad + (offset + i) * step;
-			var y = pad + plotH * (1 - v / max);
+			var x = padL + (offset + i) * step;
+			var y = padT + plotH * (1 - v / max);
 			d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
 		});
 		var path = document.createElementNS(ns, 'path');
@@ -173,7 +174,7 @@ function renderChart(status) {
 	var hasData = series.some(function(s) { return s.points.length >= 2; });
 	return E('div', {}, [
 		E('div', { style: 'margin:4px 0 8px' }, legend),
-		hasData ? lineChart(series, { height: 180 })
+		hasData ? lineChart(series)
 			: E('p', { class: 'cbi-value-description' }, _('Collecting throughput samples…'))
 	]);
 }
@@ -219,11 +220,18 @@ function renderTable(status, rates) {
 	return table;
 }
 
+function sumConns(status, field) {
+	return ((status && status.wans) || []).reduce(function(a, w) { return a + (w[field] || 0); }, 0);
+}
+
 return view.extend({
-	load: function() { return Promise.all([callStatus(), callStats()]); },
+	load: function() {
+		return Promise.all([ uci.load('gowan'), callStatus(), callStats() ]);
+	},
 
 	render: function(data) {
-		ingestStats(data[1]);
+		pollInterval = parseInt(uci.get('gowan', 'main', 'stats_interval'), 10) || 3;
+		ingestStats(data[2]);
 
 		var container = E('div', {}, [
 			E('h2', {}, _('GoWAN')),
@@ -243,10 +251,8 @@ return view.extend({
 				state = E('p', {}, [statusDot('down', true), ' ', _('GoWAN is disabled. Enable it under Settings.')]);
 			else if (status.running)
 				state = E('p', {}, [statusDot('up', true), ' ',
-					_('Proxy running on %s — %d active / %d total connections').format(
-						status.listen,
-						(status.wans || []).reduce(function(a, w) { return a + (w.active_connections || 0); }, 0),
-						(status.wans || []).reduce(function(a, w) { return a + (w.total_connections || 0); }, 0))]);
+					_('Proxy running — %d active / %d total connections').format(
+						sumConns(status, 'active_connections'), sumConns(status, 'total_connections'))]);
 			else
 				state = E('p', {}, [statusDot('down', true), ' ', _('Proxy is NOT running (enabled in config).')]);
 
@@ -255,10 +261,10 @@ return view.extend({
 			dom.content(container.querySelector('#gowan-wan-table'), renderTable(status, rates));
 		};
 
-		update(data[0], data[1]);
+		update(data[1], data[2]);
 		poll.add(function() {
 			return Promise.all([callStatus(), callStats()]).then(function(res) { update(res[0], res[1]); });
-		}, POLL);
+		}, pollInterval);
 
 		return container;
 	},

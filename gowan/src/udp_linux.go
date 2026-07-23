@@ -120,7 +120,7 @@ func udp_handle_packet(client, dst *syscall.SockaddrInet4, payload []byte) {
 		return
 	}
 	if created {
-		log.Printf("[DEBUG] udp %s -> %s via %s\n", sa_string(client), sa_string(dst), flow.lb.iface)
+		debug_logf("udp %s -> %s via %s", sa_string(client), sa_string(dst), flow.lb.iface)
 	}
 
 	// Send the client's datagram out the selected WAN.

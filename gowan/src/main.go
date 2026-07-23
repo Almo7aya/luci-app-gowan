@@ -158,7 +158,7 @@ func handle_tunnel_connection(conn net.Conn) {
 			continue
 		}
 
-		log.Println("[DEBUG] Tunnelled to", lb.address, "LB:", i)
+		debug_log("Tunnelled to", lb.address, "LB:", i)
 		lb.conn_started()
 		pipe_connections(conn, remote_conn, lb.conn_finished)
 		return
@@ -305,7 +305,7 @@ func main() {
 	var lport = flag.Int("lport", 8080, "The local port to listen for SOCKS connection")
 	var detect = flag.Bool("list", false, "Shows the available addresses for dispatching (non-tunnelling mode only)")
 	var tunnel = flag.Bool("tunnel", false, "Use tunnelling mode (acts as a transparent load balancing proxy)")
-	var quiet = flag.Bool("quiet", false, "disable logs")
+	var debug = flag.Bool("debug", false, "Log every dispatched connection/flow ([DEBUG] lines); off by default")
 
 	var check_type = flag.String("check-type", "none", "Health check type: tcp, http or none")
 	var check_target = flag.String("check-target", "8.8.8.8:53", "Health check target (host:port for tcp, URL for http)")
@@ -367,6 +367,7 @@ func main() {
 		log.Fatal("[FATAL] -backends-file is not available in tunnel mode")
 	}
 
+	debug_enabled = *debug
 	state_file = *state_path
 	on_change_cmd = *on_change
 	global_check_cfg = check_config{
@@ -443,10 +444,6 @@ func main() {
 	}
 	log.Println("[INFO] Local server started on ", local_bind_address)
 	defer l.Close()
-
-	if *quiet {
-		log.SetOutput(io.Discard)
-	}
 
 	for {
 		conn, err := l.Accept()

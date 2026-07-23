@@ -55,7 +55,7 @@ func dispatch_connection(local_conn net.Conn, remote_address string, socks bool)
 			continue
 		}
 
-		log.Println("[DEBUG]", remote_address, "->", lb.address, "LB:", i)
+		debug_log(remote_address, "->", lb.address, "LB:", i)
 		if socks {
 			local_conn.Write([]byte{5, SUCCESS, 0, 1, 0, 0, 0, 0, 0, 0})
 		}
