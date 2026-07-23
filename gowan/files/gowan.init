@@ -17,6 +17,7 @@ _gowan_read_config() {
 	config_get LISTEN_HOST main listen_host '0.0.0.0'
 	config_get LISTEN_PORT main listen_port '1080'
 	config_get_bool DEBUG main debug 0
+	config_get_bool USAGE main usage_tracking 1
 	config_get CTYPE main check_type 'tcp'
 	config_get CTARGET main check_target '8.8.8.8:53'
 	config_get CINT main check_interval 30
@@ -43,7 +44,7 @@ _gowan_read_config() {
 # reload is a pure SIGHUP (no dropped connections). Policies and per-WAN
 # backend/check settings are re-read on SIGHUP, so they are NOT here.
 _gowan_listener_sig() {
-	echo "$ENABLED/$LISTEN_HOST:$LISTEN_PORT/t$TRANSPARENT:$TPORT/a$API_ENABLED:$API_PORT/d$DEBUG/c$CTYPE:$CTARGET:$CINT:$CTMO:$CFAIL:$CRISE/s$STICKY:$STICKY_TIMEOUT/u$AUTH_ENABLED:$AUTH_USER:$AUTH_PASS/U$TRANSPARENT_UDP:$UDP_PORT:$UDP_TIMEOUT"
+	echo "$ENABLED/$LISTEN_HOST:$LISTEN_PORT/t$TRANSPARENT:$TPORT/a$API_ENABLED:$API_PORT/d$DEBUG/g$USAGE/c$CTYPE:$CTARGET:$CINT:$CTMO:$CFAIL:$CRISE/s$STICKY:$STICKY_TIMEOUT/u$AUTH_ENABLED:$AUTH_USER:$AUTH_PASS/U$TRANSPARENT_UDP:$UDP_PORT:$UDP_TIMEOUT"
 }
 
 start_service() {
@@ -87,6 +88,11 @@ start_service() {
 	fi
 	[ "$API_ENABLED" -eq 1 ] && procd_append_param command -api "127.0.0.1:$API_PORT"
 	[ "$STICKY" -eq 1 ] && procd_append_param command -sticky -sticky-timeout "$STICKY_TIMEOUT"
+	if [ "$USAGE" -eq 1 ]; then
+		mkdir -p /etc/gowan
+		procd_append_param command -usage-file /etc/gowan/usage.db \
+			-usage-tmpfs "$GOWAN_RUN_DIR/usage.json"
+	fi
 	if [ "$AUTH_ENABLED" -eq 1 ] && [ -n "$AUTH_USER" ]; then
 		procd_append_param command -auth-user "$AUTH_USER" -auth-pass "$AUTH_PASS"
 	fi

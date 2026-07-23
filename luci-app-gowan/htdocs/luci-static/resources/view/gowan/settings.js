@@ -39,6 +39,10 @@ return view.extend({
 			_('Log every dispatched connection and UDP flow to the system log. Verbose — leave off in production; enable only when troubleshooting.'));
 		o.default = '0';
 
+		o = s.option(form.Flag, 'usage_tracking', _('Track data usage'),
+			_('Accumulate per-WAN data totals (daily/monthly/all-time) for metered links; shown on the Data Usage page. Survives reboots.'));
+		o.default = '1';
+
 		s = m.section(form.NamedSection, 'main', 'gowan', _('Health Checks'));
 
 		o = s.option(form.ListValue, 'check_type', _('Check type'),

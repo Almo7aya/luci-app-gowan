@@ -39,6 +39,18 @@ func setup_reload_handler() {
 	}()
 }
 
+// Flush usage totals to the persistent file on SIGTERM/SIGINT (procd
+// stop) so a graceful stop doesn't lose accounting since the last flush.
+func setup_shutdown_flush() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-c
+		flush_usage()
+		os.Exit(0)
+	}()
+}
+
 /*
 SIGHUP: re-read the backends file and swap the backend set without
 touching the listeners — active connections are never dropped.

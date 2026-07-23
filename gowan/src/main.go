@@ -332,6 +332,10 @@ func main() {
 	var backends_path = flag.String("backends-file", "", "Load backends (with per-backend check config) from this JSON file; SIGHUP re-reads it without dropping connections")
 	var policy_path = flag.String("policy-file", "", "Load client-IP policy rules from this JSON file (SIGHUP re-reads it)")
 	var api_addr = flag.String("api", "", "Serve GET /status as JSON on this address, e.g. 127.0.0.1:9080 (empty = off)")
+	var usage_file = flag.String("usage-file", "", "Persist per-interface data-usage totals to this file (survives reboots)")
+	var usage_tmpfs_path = flag.String("usage-tmpfs", "", "Write live usage snapshots to this (tmpfs) file for LuCI")
+	var usage_interval = flag.Int("usage-interval", 10, "Seconds between usage samples")
+	var usage_flush = flag.Int("usage-flush", 600, "Seconds between persistent usage flushes to -usage-file")
 	var sticky = flag.Bool("sticky", false, "Pin each client IP to the same backend for the session")
 	var sticky_timeout = flag.Int("sticky-timeout", 300, "Sticky mapping lifetime in seconds")
 	var auth_u = flag.String("auth-user", "", "SOCKS5 username (enables RFC 1929 auth on the SOCKS listener)")
@@ -433,6 +437,13 @@ func main() {
 
 	write_state_file()
 	setup_reload_handler()
+
+	if *usage_file != "" || *usage_tmpfs_path != "" {
+		start_usage_tracking(*usage_file, *usage_tmpfs_path,
+			time.Duration(*usage_interval)*time.Second,
+			time.Duration(*usage_flush)*time.Second)
+		setup_shutdown_flush()
+	}
 
 	if *api_addr != "" {
 		start_status_api(*api_addr)

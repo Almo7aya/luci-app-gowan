@@ -125,6 +125,50 @@ do_stats() {
 	json_dump
 }
 
+GOWAN_USAGE_FILE=/var/run/gowan/usage.json
+
+_usage_field() {
+	local dev="$1" field="$2"
+	case "$dev" in
+		''|*[!a-zA-Z0-9._-]*) return 1 ;;  # device names only
+	esac
+	[ -f "$GOWAN_USAGE_FILE" ] || return 1
+	jsonfilter -i "$GOWAN_USAGE_FILE" -e "@[\"$dev\"].$field" 2>/dev/null
+}
+
+_add_wan_usage() {
+	local section="$1" label iface device
+	config_get label "$section" label "$section"
+	config_get iface "$section" interface
+	[ -n "$iface" ] || return 0
+	network_get_device device "$iface"
+	[ -n "$device" ] || return 0
+
+	json_add_object ""
+	json_add_string section "$section"
+	json_add_string label "$label"
+	json_add_string device "$device"
+	json_add_int total_rx "$(_usage_field "$device" total_rx || echo 0)"
+	json_add_int total_tx "$(_usage_field "$device" total_tx || echo 0)"
+	json_add_int month_rx "$(_usage_field "$device" month_rx || echo 0)"
+	json_add_int month_tx "$(_usage_field "$device" month_tx || echo 0)"
+	json_add_int day_rx "$(_usage_field "$device" day_rx || echo 0)"
+	json_add_int day_tx "$(_usage_field "$device" day_tx || echo 0)"
+	json_add_string month "$(_usage_field "$device" month || echo '')"
+	json_close_object
+}
+
+do_usage() {
+	config_load gowan
+	network_flush_cache
+
+	json_init
+	json_add_array wans
+	config_foreach _add_wan_usage wan
+	json_close_array
+	json_dump
+}
+
 do_log() {
 	local input lines logdata line
 
@@ -226,6 +270,8 @@ case "$1" in
 		json_close_object
 		json_add_object speedtest_status
 		json_close_object
+		json_add_object usage
+		json_close_object
 		json_dump
 		;;
 	call)
@@ -235,6 +281,7 @@ case "$1" in
 			log) do_log ;;
 			speedtest_start) do_speedtest_start ;;
 			speedtest_status) do_speedtest_status ;;
+			usage) do_usage ;;
 			*) exit 1 ;;
 		esac
 		;;

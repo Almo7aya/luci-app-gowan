@@ -47,9 +47,18 @@
 		}
 	},
 
+	"admin/network/gowan/usage": {
+		"title": "Data Usage",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "gowan/usage"
+		}
+	},
+
 	"admin/network/gowan/speedtest": {
 		"title": "Speed Test",
-		"order": 5,
+		"order": 6,
 		"action": {
 			"type": "view",
 			"path": "gowan/speedtest"
@@ -58,7 +67,7 @@
 
 	"admin/network/gowan/log": {
 		"title": "Log",
-		"order": 6,
+		"order": 7,
 		"action": {
 			"type": "view",
 			"path": "gowan/log"
@@ -67,7 +76,7 @@
 
 	"admin/network/gowan/settings": {
 		"title": "Settings",
-		"order": 7,
+		"order": 8,
 		"action": {
 			"type": "view",
 			"path": "gowan/settings"

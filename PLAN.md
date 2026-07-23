@@ -177,6 +177,7 @@
 | 21 | Failover notifications ✅ *shipped in v0.4.0* | `notify.sh` on the daemon's `-on-change` hook fires Telegram/Discord/webhook on WAN state change |
 | 22 | Speed test per WAN ✅ *shipped in v0.4.0* | LuCI button → rpcd → `curl --interface`, result inline; verified on hardware |
 | 23 | Live throughput + graphs ✅ *shipped in v0.4.0* | Overview computes per-WAN down/up rate from /proc/net/dev deltas; rolling multi-line SVG chart (no deps) |
+| 23b | Data usage tracking ✅ *shipped in v0.8.0* | Per-WAN cumulative RX/TX (all-time/month/day) from /proc/net/dev, counter-reset + rollover handling, 90-day history, persisted across reboots (tmpfs live + flash flush + SIGTERM flush). LuCI Data Usage page + `usage` ubus method. Quotas/alerts + enforcement = follow-up. Verified on hardware incl. persistence across restart. |
 | 24 | Structured logging | JSON logs to syslog; per-connection bytes/duration |
 | 25 | Router-traffic resilience | Per-WAN dnsmasq upstreams (`server=8.8.8.8@device`) + optional default-route failover driven by the `-on-change` hook |
 
