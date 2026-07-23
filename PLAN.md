@@ -183,8 +183,8 @@
 
 | # | Feature | Description |
 |---|---------|-------------|
-| 25 | TUN interface mode | Full L3 coverage including UDP, via gVisor netstack or pairing with stock tun2socks. Heavy (RAM/binary size); pursued only if transparent-TCP mode proves insufficient. |
-| 26 | UDP ASSOCIATE | SOCKS5 UDP relay in the fork |
+| 25 | Transparent UDP ✅ *shipped in v0.5.0* | TPROXY-based UDP relay through the daemon: intercepted UDP (DNS, QUIC, games, VoIP) balanced across the WANs with per-flow affinity + idle reaping; IP_TRANSPARENT spoofed-source return path. Needs kmod-nft-tproxy. Verified on hardware (DNS round-trip + live STUN relay). |
+| 26 | TUN interface mode | Full L3 coverage (incl. UDP aggregation) via gVisor netstack. Heavy; only if transparent modes prove insufficient. |
 | 27 | Per-WAN traffic graphs | Historical bandwidth via rrdtool/luci-app-statistics integration |
 | 28 | IPv6 | v6 backends, listeners, and interception rules |
 

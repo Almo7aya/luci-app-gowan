@@ -26,6 +26,9 @@ _gowan_read_config() {
 	config_get_bool TRANSPARENT main transparent 0
 	config_get TPORT main transparent_port 1081
 	config_get_bool BLOCK_QUIC main block_quic 1
+	config_get_bool TRANSPARENT_UDP main transparent_udp 0
+	config_get UDP_PORT main transparent_udp_port 1082
+	config_get UDP_TIMEOUT main udp_timeout 60
 	config_get_bool API_ENABLED main api_enabled 0
 	config_get API_PORT main api_port 9080
 	config_get_bool STICKY main sticky 0
@@ -40,7 +43,7 @@ _gowan_read_config() {
 # reload is a pure SIGHUP (no dropped connections). Policies and per-WAN
 # backend/check settings are re-read on SIGHUP, so they are NOT here.
 _gowan_listener_sig() {
-	echo "$ENABLED/$LISTEN_HOST:$LISTEN_PORT/t$TRANSPARENT:$TPORT/a$API_ENABLED:$API_PORT/q$LOG_CONNECTIONS/c$CTYPE:$CTARGET:$CINT:$CTMO:$CFAIL:$CRISE/s$STICKY:$STICKY_TIMEOUT/u$AUTH_ENABLED:$AUTH_USER:$AUTH_PASS"
+	echo "$ENABLED/$LISTEN_HOST:$LISTEN_PORT/t$TRANSPARENT:$TPORT/a$API_ENABLED:$API_PORT/q$LOG_CONNECTIONS/c$CTYPE:$CTARGET:$CINT:$CTMO:$CFAIL:$CRISE/s$STICKY:$STICKY_TIMEOUT/u$AUTH_ENABLED:$AUTH_USER:$AUTH_PASS/U$TRANSPARENT_UDP:$UDP_PORT:$UDP_TIMEOUT"
 }
 
 start_service() {
@@ -58,7 +61,7 @@ start_service() {
 	fi
 	gowan_render_policies
 
-	gowan_apply_nft "$LISTEN_PORT" "$TRANSPARENT" "$TPORT" "$BLOCK_QUIC" || \
+	gowan_apply_nft "$LISTEN_PORT" "$TRANSPARENT" "$TPORT" "$BLOCK_QUIC" "$TRANSPARENT_UDP" "$UDP_PORT" || \
 		logger -t gowan -p daemon.err "failed to apply gowan nftables rules"
 
 	_gowan_listener_sig > "$GOWAN_RUN_DIR/listener.sig"
@@ -70,6 +73,9 @@ start_service() {
 		-state-file "$GOWAN_STATE_FILE" \
 		-on-change /usr/lib/gowan/notify.sh
 	[ "$TRANSPARENT" -eq 1 ] && procd_append_param command -transparent "$TPORT"
+	if [ "$TRANSPARENT" -eq 1 ] && [ "$TRANSPARENT_UDP" -eq 1 ]; then
+		procd_append_param command -transparent-udp "$UDP_PORT" -udp-timeout "$UDP_TIMEOUT"
+	fi
 	[ "$API_ENABLED" -eq 1 ] && procd_append_param command -api "127.0.0.1:$API_PORT"
 	[ "$STICKY" -eq 1 ] && procd_append_param command -sticky -sticky-timeout "$STICKY_TIMEOUT"
 	if [ "$AUTH_ENABLED" -eq 1 ] && [ -n "$AUTH_USER" ]; then
@@ -114,7 +120,7 @@ reload_service() {
 
 	# Hot path: re-render backends + firewall, then SIGHUP — the daemon
 	# swaps its backend set without dropping a single connection.
-	gowan_apply_nft "$LISTEN_PORT" "$TRANSPARENT" "$TPORT" "$BLOCK_QUIC" || \
+	gowan_apply_nft "$LISTEN_PORT" "$TRANSPARENT" "$TPORT" "$BLOCK_QUIC" "$TRANSPARENT_UDP" "$UDP_PORT" || \
 		logger -t gowan -p daemon.err "failed to apply gowan nftables rules"
 
 	gowan_render_policies

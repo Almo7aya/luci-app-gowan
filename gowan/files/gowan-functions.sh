@@ -59,18 +59,38 @@ _gowan_transparent_subnets() {
 	echo "$subnets"
 }
 
-# gowan_apply_nft <socks-port> <transparent-enabled> <transparent-port> <block-quic>
+# TPROXY plumbing: locally-delivered marked packets need their own
+# routing table so the kernel hands them to the transparent socket.
+GOWAN_TPROXY_MARK=0x1
+GOWAN_TPROXY_TABLE=100
+
+gowan_apply_tproxy_route() {
+	ip rule list 2>/dev/null | grep -q "fwmark $GOWAN_TPROXY_MARK lookup $GOWAN_TPROXY_TABLE" || \
+		ip rule add fwmark "$GOWAN_TPROXY_MARK" lookup "$GOWAN_TPROXY_TABLE" 2>/dev/null
+	ip route show table "$GOWAN_TPROXY_TABLE" 2>/dev/null | grep -q "local default" || \
+		ip route add local default dev lo table "$GOWAN_TPROXY_TABLE" 2>/dev/null
+}
+
+gowan_teardown_tproxy_route() {
+	ip rule del fwmark "$GOWAN_TPROXY_MARK" lookup "$GOWAN_TPROXY_TABLE" 2>/dev/null
+	ip route flush table "$GOWAN_TPROXY_TABLE" 2>/dev/null
+	return 0
+}
+
+# gowan_apply_nft <socks-port> <transparent> <tport> <block-quic> <udp> <udp-port>
 # Materializes the whole gowan ruleset into a dedicated nftables table:
-# input-chain ACL guarding both listener ports, plus (when enabled) the
-# transparent prerouting redirect and the QUIC block. Idempotent —
-# replaces any previous gowan table. Independent from fw4's table, so
-# firewall reloads never wipe it.
+# input-chain ACL guarding the listener ports, plus (when enabled) the
+# transparent TCP redirect, the UDP TPROXY chain, and the QUIC block.
+# Idempotent — replaces any previous gowan table. Independent from fw4's
+# table, so firewall reloads never wipe it.
 gowan_apply_nft() {
 	local socks_port="$1" transparent="$2" tport="$3" block_quic="$4"
+	local udp="$5" udp_port="$6"
 	local default rules tail_rule="" guarded_ports subnets extra=""
 
 	case "$socks_port" in ''|*[!0-9]*) return 1 ;; esac
 	case "$tport" in ''|*[!0-9]*) return 1 ;; esac
+	case "$udp_port" in ''|*[!0-9]*) udp_port=0 ;; esac
 
 	config_get default main acl_default deny
 	rules="$(config_foreach _gowan_emit_acl_rule acl)"
@@ -88,7 +108,17 @@ gowan_apply_nft() {
 		ip daddr { $GOWAN_NO_INTERCEPT } return
 		ip saddr { $subnets } meta l4proto tcp redirect to :$tport
 	}"
-			if [ "$block_quic" = "1" ]; then
+			# UDP relay via TPROXY (mangle-priority prerouting). When on,
+			# we carry QUIC rather than blocking it.
+			if [ "$udp" = "1" ] && [ "$udp_port" != "0" ]; then
+				gowan_apply_tproxy_route
+				extra="$extra
+	chain udp_tproxy {
+		type filter hook prerouting priority mangle; policy accept;
+		ip daddr { $GOWAN_NO_INTERCEPT } return
+		ip saddr { $subnets } meta l4proto udp tproxy ip to :$udp_port meta mark set $GOWAN_TPROXY_MARK
+	}"
+			elif [ "$block_quic" = "1" ]; then
 				extra="$extra
 	chain quic {
 		type filter hook forward priority 0; policy accept;
@@ -121,6 +151,7 @@ gowan_apply_nft() {
 
 gowan_teardown_acl() {
 	nft delete table inet gowan 2>/dev/null
+	gowan_teardown_tproxy_route
 	return 0
 }
 

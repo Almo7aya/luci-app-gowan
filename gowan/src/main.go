@@ -316,6 +316,8 @@ func main() {
 	var state_path = flag.String("state-file", "", "Write backend health state as JSON to this file")
 	var on_change = flag.String("on-change", "", "Run '<cmd> <backend-ip> <old-state> <new-state>' on every health flip")
 	var transparent_port = flag.Int("transparent", 0, "Also accept nft/iptables-REDIRECTed connections on this port (Linux only, 0 = off)")
+	var transparent_udp_port = flag.Int("transparent-udp", 0, "Relay TPROXY'd UDP on this port across the WANs (Linux only, 0 = off)")
+	var udp_timeout = flag.Int("udp-timeout", 60, "Idle seconds before a UDP flow is dropped")
 	var backends_path = flag.String("backends-file", "", "Load backends (with per-backend check config) from this JSON file; SIGHUP re-reads it without dropping connections")
 	var policy_path = flag.String("policy-file", "", "Load client-IP policy rules from this JSON file (SIGHUP re-reads it)")
 	var api_addr = flag.String("api", "", "Serve GET /status as JSON on this address, e.g. 127.0.0.1:9080 (empty = off)")
@@ -348,6 +350,12 @@ func main() {
 	}
 	if *transparent_port != 0 && *tunnel {
 		log.Fatal("[FATAL] transparent mode is not available in tunnel mode")
+	}
+	if *transparent_udp_port < 0 || *transparent_udp_port > 65535 {
+		log.Fatal("[FATAL] Invalid transparent-udp port ", *transparent_udp_port)
+	}
+	if *transparent_udp_port != 0 && *tunnel {
+		log.Fatal("[FATAL] transparent UDP is not available in tunnel mode")
 	}
 
 	switch *check_type {
@@ -420,6 +428,10 @@ func main() {
 
 	if *transparent_port != 0 {
 		start_transparent_listener(*lhost, *transparent_port)
+	}
+
+	if *transparent_udp_port != 0 {
+		start_udp_transparent(*lhost, *transparent_udp_port, time.Duration(*udp_timeout)*time.Second)
 	}
 
 	local_bind_address := fmt.Sprintf("%s:%d", *lhost, *lport)

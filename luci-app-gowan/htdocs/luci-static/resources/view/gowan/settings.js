@@ -105,10 +105,26 @@ return view.extend({
 		o.placeholder = '10.0.1.0/24';
 		o.depends('transparent', '1');
 
-		o = s.option(form.Flag, 'block_quic', _('Block QUIC (UDP 443)'),
-			_('Forces browsers to fall back from HTTP/3 to TCP so their traffic is actually balanced. Recommended while transparent mode is on.'));
-		o.default = '1';
+		o = s.option(form.Flag, 'transparent_udp', _('Balance UDP too (experimental)'),
+			_('Relays intercepted UDP (DNS, QUIC, games, VoIP) across the WANs via TPROXY, with per-flow affinity. Each flow stays on one WAN; this distributes flows, it does not aggregate a single connection.'));
+		o.default = '0';
 		o.depends('transparent', '1');
+
+		o = s.option(form.Value, 'transparent_udp_port', _('UDP TPROXY port'),
+			_('Internal port for the UDP relay; clients never use it'));
+		o.datatype = 'port';
+		o.default = '1082';
+		o.depends('transparent_udp', '1');
+
+		o = s.option(form.Value, 'udp_timeout', _('UDP flow idle timeout (s)'));
+		o.datatype = 'range(5,3600)';
+		o.default = '60';
+		o.depends('transparent_udp', '1');
+
+		o = s.option(form.Flag, 'block_quic', _('Block QUIC (UDP 443)'),
+			_('Forces browsers to fall back from HTTP/3 to TCP so their traffic is balanced. Ignored when UDP balancing is on (QUIC is then carried, not blocked).'));
+		o.default = '1';
+		o.depends({ transparent: '1', transparent_udp: '0' });
 
 		s = m.section(form.NamedSection, 'main', 'gowan', _('Sticky Sessions'),
 			_('Pin each client IP to the same backend for the duration of a session — useful for sites that dislike a session hopping between source IPs.'));

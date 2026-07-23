@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=gowan
-PKG_VERSION:=0.4.1
+PKG_VERSION:=0.5.0
 PKG_RELEASE:=1
 
 # Source is VENDORED in ./src — an upstream go-dispatch-proxy snapshot (MIT)
@@ -31,7 +31,9 @@ define Package/gowan
   CATEGORY:=Network
   TITLE:=GoWAN - Multi-WAN SOCKS5 load balancer
   URL:=https://github.com/Almo7aya/luci-app-gowan
-  DEPENDS:=$(GO_ARCH_DEPENDS)
+  # kmod-nft-tproxy is only needed for the optional transparent-UDP
+  # feature; it is small and lets the LuCI toggle work out of the box.
+  DEPENDS:=$(GO_ARCH_DEPENDS) +kmod-nft-tproxy
 endef
 
 define Package/gowan/description
