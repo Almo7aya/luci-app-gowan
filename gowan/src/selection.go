@@ -22,15 +22,18 @@ Order on the first attempt:
  2. existing sticky mapping for the client IP  -> same backend (if healthy)
  3. weighted round-robin, and remember the choice for stickiness
 */
-func pick_backend(client_ip, dest string, tried *big.Int) (*load_balancer, int) {
+// pick_backend layers policy + sticky over round-robin. dest_ip is the
+// destination IP ("" if only a hostname is known), dest_host the
+// destination hostname ("" if only an IP is known) — separated so
+// dest_ip rules match on the address and domain rules on the name, even
+// in transparent mode where both come from different sources (SO_ORIGINAL_DST
+// gives the IP, SNI/Host sniffing gives the name).
+func pick_backend(client_ip, dest_ip, dest_host string, dest_port int, tried *big.Int) (*load_balancer, int) {
 	if len(tried.Bits()) != 0 {
 		return get_load_balancer(tried)
 	}
 
-	// dest is "host:port"; host may be an IP (transparent, or SOCKS IPv4)
-	// or a domain (SOCKS with a hostname).
-	dest_host, dest_port := split_dest(dest)
-	if lb, i := policy_backend(client_ip, dest_host, dest_port); lb != nil {
+	if lb, i := policy_backend(client_ip, dest_ip, dest_host, dest_port); lb != nil {
 		return lb, i
 	}
 	if lb, i := sticky_lookup(client_ip); lb != nil {
@@ -42,15 +45,6 @@ func pick_backend(client_ip, dest string, tried *big.Int) (*load_balancer, int) 
 		sticky_remember(client_ip, i)
 	}
 	return lb, i
-}
-
-func split_dest(dest string) (string, int) {
-	host, portStr, err := net.SplitHostPort(dest)
-	if err != nil {
-		return "", 0
-	}
-	port, _ := strconv.Atoi(portStr)
-	return host, port
 }
 
 func client_ip_of(conn net.Conn) string {
@@ -188,15 +182,18 @@ func (r *policy_rule) matches(client_ip, dest_ip net.IP, dest_host string, dest_
 			}
 		}
 	case "domain":
-		return dest_ip == nil && dest_host != "" && domain_match(dest_host, r.doms)
+		// dest_host is only ever a real hostname (never an IP), so no
+		// need to also require dest_ip==nil — in transparent mode we
+		// have both the IP (dial target) and the SNI/Host name.
+		return dest_host != "" && domain_match(dest_host, r.doms)
 	}
 	return false
 }
 
 // Returns the healthy backend a policy pins this connection to, or nil.
-func policy_backend(client_ip_str, dest_host string, dest_port int) (*load_balancer, int) {
+func policy_backend(client_ip_str, dest_ip_str, dest_host string, dest_port int) (*load_balancer, int) {
 	client_ip := net.ParseIP(client_ip_str)
-	dest_ip := net.ParseIP(dest_host) // nil when dest_host is a domain
+	dest_ip := net.ParseIP(dest_ip_str) // nil when only a hostname is known
 
 	policy_mu.RLock()
 	var wan string

@@ -50,7 +50,7 @@ func TestTransparentDispatchWritesNoSocksBytes(t *testing.T) {
 	client, proxy := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		dispatch_connection(proxy, "192.0.2.1:443", false)
+		dispatch(proxy, "192.0.2.1:443", "", false, nil)
 		close(done)
 	}()
 

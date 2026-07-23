@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"syscall"
+	"time"
 )
 
 // SO_ORIGINAL_DST retrieves the pre-DNAT destination recorded by
@@ -93,11 +94,40 @@ func handle_transparent_connection(conn net.Conn, lport int) {
 
 	// Direct (non-redirected) connections report the listener's own
 	// address as "original destination" — never dial those.
-	if _, port, err := net.SplitHostPort(dst); err == nil && port == fmt.Sprint(lport) {
+	_, port, _ := net.SplitHostPort(dst)
+	if port == fmt.Sprint(lport) {
 		log.Println("[WARN] transparent: dropping direct connection from", conn.RemoteAddr())
 		conn.Close()
 		return
 	}
 
-	dispatch_connection(conn, dst, false)
+	// Sniff the destination hostname (TLS SNI on 443, HTTP Host on 80) so
+	// domain policy rules can apply; replay the read bytes to the backend.
+	host, prebuf := sniff_dest(conn, port)
+	debug_logf("transparent dst=%s sniffed_host=%q prebuf=%dB", dst, host, len(prebuf))
+	dispatch(conn, dst, host, false, prebuf)
+}
+
+/*
+Reads the first client bytes to extract the destination hostname for
+domain policy matching. Only for HTTP(80)/HTTPS(443) — other ports skip
+sniffing (dispatched by IP immediately). Returns the hostname (or "")
+and the bytes read, which the caller must replay to the backend.
+*/
+func sniff_dest(conn net.Conn, port string) (string, []byte) {
+	if port != "443" && port != "80" {
+		return "", nil
+	}
+	buf := make([]byte, 4096)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _ := conn.Read(buf)
+	conn.SetReadDeadline(time.Time{}) // clear for the piping phase
+	if n <= 0 {
+		return "", nil
+	}
+	data := buf[:n]
+	if port == "443" {
+		return parse_tls_sni(data), data
+	}
+	return parse_http_host(data), data
 }

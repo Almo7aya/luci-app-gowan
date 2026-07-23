@@ -36,7 +36,7 @@ return view.extend({
 		o.default = 'client_ip';
 
 		o = s.option(form.Value, 'match', _('Match'),
-			_('Comma-separated list. Client/Dest IP: address or CIDR (e.g. 10.0.1.5, 192.168.0.0/16). Port: single, list, or range (e.g. 443,6881:6889). Domain: hostnames or wildcards (e.g. *.youtube.com) — matches SOCKS5 clients that send a hostname; transparent traffic carries only an IP.'));
+			_('Comma-separated list. Client/Dest IP: address or CIDR (e.g. 10.0.1.5, 192.168.0.0/16). Port: single, list, or range (e.g. 443,6881:6889). Domain: hostnames or wildcards (e.g. *.youtube.com) — matched via SOCKS5 hostnames and, in transparent mode, via TLS SNI (HTTPS/443) and the HTTP Host header (port 80).'));
 		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'wan', _('Target WAN'));
