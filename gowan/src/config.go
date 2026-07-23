@@ -29,10 +29,11 @@ type backend_check_json struct {
 }
 
 type backend_json struct {
-	Name  string              `json:"name"`
-	IP    string              `json:"ip"`
-	Ratio int                 `json:"ratio"`
-	Check *backend_check_json `json:"check"`
+	Name   string              `json:"name"`
+	IP     string              `json:"ip"`
+	Ratio  int                 `json:"ratio"`
+	Metric int                 `json:"metric"`
+	Check  *backend_check_json `json:"check"`
 }
 
 type backends_file_json struct {

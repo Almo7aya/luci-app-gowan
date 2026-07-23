@@ -95,6 +95,55 @@ func TestAllExcludedReturnsNil(t *testing.T) {
 	}
 }
 
+// Sets up backends with explicit metrics for tier tests.
+func setup_tiered(t *testing.T, metrics []int, up []bool) {
+	t.Helper()
+	lb_list = make([]*load_balancer, len(metrics))
+	for i := range metrics {
+		lb_list[i] = &load_balancer{
+			name:             "wan",
+			address:          "10.0.0.1:0",
+			contention_ratio: 1,
+			metric:           metrics[i],
+			up:               up[i],
+		}
+	}
+	lb_index = 0
+	checkers = nil
+}
+
+func TestMetricTierPrimaryOnly(t *testing.T) {
+	// wan0,wan1 primary (metric 0); wan2 backup (metric 10), all up.
+	setup_tiered(t, []int{0, 0, 10}, []bool{true, true, true})
+	for i, idx := range pick_sequence(t, 10) {
+		if idx == 2 {
+			t.Fatalf("pick %d used the backup tier while primaries are up", i)
+		}
+	}
+}
+
+func TestMetricTierFailoverToBackup(t *testing.T) {
+	// Both primaries down → the backup tier must take over.
+	setup_tiered(t, []int{0, 0, 10}, []bool{false, false, true})
+	for i, idx := range pick_sequence(t, 4) {
+		if idx != 2 {
+			t.Fatalf("pick %d: want backup (idx 2), got %d", i, idx)
+		}
+	}
+}
+
+func TestMetricTierAllDownFailOpen(t *testing.T) {
+	// Everything down → fail open across all backends regardless of tier.
+	setup_tiered(t, []int{0, 0, 10}, []bool{false, false, false})
+	seen := map[int]bool{}
+	for _, idx := range pick_sequence(t, 6) {
+		seen[idx] = true
+	}
+	if !seen[0] || !seen[1] || !seen[2] {
+		t.Fatalf("all-down guard must consider every backend, saw %v", seen)
+	}
+}
+
 func TestExclusionBeatsAllDownGuard(t *testing.T) {
 	// Backends may be DOWN-but-eligible (all-down guard), yet an already
 	// tried backend must never be retried within the same connection.

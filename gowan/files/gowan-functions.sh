@@ -160,7 +160,7 @@ gowan_teardown_acl() {
 # gowan_render_backends. Per-WAN check_* options are optional overrides;
 # absent fields inherit the daemon's global -check-* flags.
 _gowan_render_wan() {
-	local section="$1" enabled iface ratio ip
+	local section="$1" enabled iface ratio metric ip
 	local ctype ctarget cint ctmo cfail crise
 
 	config_get_bool enabled "$section" enabled 1
@@ -173,6 +173,7 @@ _gowan_render_wan() {
 		return 0
 	fi
 	config_get ratio "$section" ratio 1
+	config_get metric "$section" metric 0
 
 	config_get ctype "$section" check_type ""
 	config_get ctarget "$section" check_target ""
@@ -185,6 +186,7 @@ _gowan_render_wan() {
 	json_add_string name "$section"
 	json_add_string ip "$ip"
 	json_add_int ratio "$ratio"
+	json_add_int metric "$metric"
 	if [ -n "$ctype$ctarget$cint$ctmo$cfail$crise" ]; then
 		json_add_object check
 		[ -n "$ctype" ] && json_add_string type "$ctype"

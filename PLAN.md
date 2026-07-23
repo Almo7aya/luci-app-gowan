@@ -172,6 +172,7 @@
 | 17 | JSON status API ✅ *shipped in v0.3.0* | `-api 127.0.0.1:9080` → `GET /status`: uptime, per-backend health and connection counters; localhost-only |
 | 18 | Policy routing (all types) ✅ *client-IP v0.4.0, port/dest-IP/domain v0.6.0* | client-IP / dest-IP / port / domain → WAN, first-match-wins, comma-separated lists + port ranges; down-backend falls back. domain matches SOCKS hostnames only (transparent carries IP); SNI sniffing for transparent-mode domains is a future item |
 | 19 | Sticky sessions ✅ *shipped in v0.4.0* | In-memory client-IP → WAN map with TTL, refreshed on use, skips down backends |
+| 19b | Backup/priority WAN tiers ✅ *shipped in v0.7.0* | Per-WAN `metric`; only the lowest-metric UP tier is active, higher tiers are backups that activate when all lower ones are down. Verified on hardware. |
 | 20 | SOCKS5 authentication ✅ *shipped in v0.4.0* | RFC 1929 username/password (SOCKS5 listener only; transparent mode is ACL-guarded); constant-time compare |
 | 21 | Failover notifications ✅ *shipped in v0.4.0* | `notify.sh` on the daemon's `-on-change` hook fires Telegram/Discord/webhook on WAN state change |
 | 22 | Speed test per WAN ✅ *shipped in v0.4.0* | LuCI button → rpcd → `curl --interface`, result inline; verified on hardware |

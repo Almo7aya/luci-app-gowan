@@ -19,6 +19,7 @@ type load_balancer struct {
 	address             string
 	iface               string
 	contention_ratio    int
+	metric              int // lower = preferred; higher tiers are backups
 	current_connections int
 
 	// Health + traffic state. Written by the backend's health checker,
@@ -58,21 +59,27 @@ var mutex = &sync.Mutex{}
 /*
 Get a load balancer according to contention ratio.
 
-Health-aware: backends marked DOWN are skipped — unless every backend is
-DOWN, in which case all of them stay eligible (a proxy failing
+Tiered by metric: only UP backends in the lowest-metric tier are active;
+higher-metric backends are backups that come into play only when every
+lower tier is down. Backends marked DOWN are skipped — unless every
+backend is DOWN, in which case all stay eligible (a proxy failing
 per-connection beats a dead listener). The optional exclude set holds
 backends the caller already tried this connection (dial fallback);
-returns nil when every backend is excluded.
+returns nil when every eligible backend is excluded.
 */
 func get_load_balancer(exclude *big.Int) (*load_balancer, int) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
+	// Active tier = the lowest metric among UP backends.
 	all_down := true
+	active_metric := 0
 	for _, lb := range lb_list {
 		if lb.up {
+			if all_down || lb.metric < active_metric {
+				active_metric = lb.metric
+			}
 			all_down = false
-			break
 		}
 	}
 
@@ -81,7 +88,11 @@ func get_load_balancer(exclude *big.Int) (*load_balancer, int) {
 		i := lb_index
 
 		excluded := exclude != nil && exclude.Bit(i) != 0
-		if excluded || (!all_down && !lb.up) {
+		// Eligible: not already tried, and either everything is down
+		// (fail-open on the whole set) or this backend is UP and in the
+		// active tier.
+		eligible := !excluded && (all_down || (lb.up && lb.metric == active_metric))
+		if !eligible {
 			lb.current_connections = 0
 			advance_lb_index()
 			continue

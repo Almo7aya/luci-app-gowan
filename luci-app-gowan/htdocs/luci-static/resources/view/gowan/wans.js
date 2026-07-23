@@ -36,6 +36,11 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
+		o = s.option(form.Value, 'metric', _('Metric (tier)'),
+			_('Lower is preferred. WANs with the same metric load-balance together; a higher-metric WAN is a backup, used only when every lower-metric WAN is down. Leave 0 to keep all WANs active.'));
+		o.datatype = 'range(0,1000)';
+		o.default = '0';
+
 		// Per-WAN health check overrides — edit dialog only. Empty
 		// fields inherit the global settings.
 		o = s.option(form.ListValue, 'check_type', _('Check type override'),

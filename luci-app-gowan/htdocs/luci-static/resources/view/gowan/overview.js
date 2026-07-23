@@ -186,6 +186,7 @@ function renderTable(status, rates) {
 			E('th', { class: 'th' }, _('Interface')),
 			E('th', { class: 'th' }, _('Source IP')),
 			E('th', { class: 'th' }, _('Ratio')),
+			E('th', { class: 'th' }, _('Metric')),
 			E('th', { class: 'th' }, _('Status')),
 			E('th', { class: 'th' }, _('For')),
 			E('th', { class: 'th' }, _('↓ / ↑ now')),
@@ -197,7 +198,7 @@ function renderTable(status, rates) {
 	var wans = (status && status.wans) || [];
 	if (!wans.length) {
 		table.appendChild(E('tr', { class: 'tr placeholder' }, [
-			E('td', { class: 'td', colspan: 9 }, _('No WAN backends configured. Add some under WAN Backends.'))
+			E('td', { class: 'td', colspan: 10 }, _('No WAN backends configured. Add some under WAN Backends.'))
 		]));
 		return table;
 	}
@@ -210,6 +211,7 @@ function renderTable(status, rates) {
 			E('td', { class: 'td' }, devlabel),
 			E('td', { class: 'td' }, w.ip || _('no address')),
 			E('td', { class: 'td' }, String(w.ratio || 1)),
+			E('td', { class: 'td' }, String(w.metric || 0)),
 			E('td', { class: 'td' }, statusDot(w.status, w.enabled)),
 			E('td', { class: 'td' }, fmtSince(w.since)),
 			E('td', { class: 'td' }, (r.down != null ? fmtRate(r.down) : '–') + ' / ' + (r.up != null ? fmtRate(r.up) : '–')),

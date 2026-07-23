@@ -111,6 +111,7 @@ func apply_backends(list []backend_json) int {
 			lb.name = c.bj.Name
 			lb.iface = c.iface
 			lb.contention_ratio = c.bj.Ratio
+			lb.metric = c.bj.Metric
 			lb.current_connections = 0
 		} else {
 			lb = &load_balancer{
@@ -118,6 +119,7 @@ func apply_backends(list []backend_json) int {
 				address:          c.bj.IP + ":0",
 				iface:            c.iface,
 				contention_ratio: c.bj.Ratio,
+				metric:           c.bj.Metric,
 				up:               true,
 				status_since:     time.Now().Unix(),
 			}

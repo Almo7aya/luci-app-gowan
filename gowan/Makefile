@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=gowan
-PKG_VERSION:=0.6.0
+PKG_VERSION:=0.7.0
 PKG_RELEASE:=1
 
 # Source is VENDORED in ./src — an upstream go-dispatch-proxy snapshot (MIT)

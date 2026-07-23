@@ -23,6 +23,7 @@ type backend_state struct {
 	IP           string `json:"ip"`
 	Iface        string `json:"iface"`
 	Ratio        int    `json:"ratio"`
+	Metric       int    `json:"metric"`
 	Status       string `json:"status"`
 	Since        int64  `json:"since"`
 	ChecksOK     uint64 `json:"checks_ok"`
@@ -54,6 +55,7 @@ func snapshot_backends() []backend_state {
 			IP:           backend_ip(lb),
 			Iface:        lb.iface,
 			Ratio:        lb.contention_ratio,
+			Metric:       lb.metric,
 			Status:       status,
 			Since:        lb.status_since,
 			ChecksOK:     lb.checks_ok,
